@@ -1,0 +1,21 @@
+{
+  "name": "vortex-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VORTEX AI — The Creative Operating System for Video",
+  "scripts": {
+    "dev": "cd apps/web && npm run dev",
+    "build": "cd apps/web && npm run build",
+    "start": "cd apps/web && npm run start",
+    "db:generate": "cd apps/web && npx prisma generate",
+    "db:push": "cd apps/web && npx prisma db push",
+    "db:migrate": "cd apps/web && npx prisma migrate dev",
+    "db:studio": "cd apps/web && npx prisma studio",
+    "lint": "cd apps/web && npm run lint",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,jsx,json,css,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.2.0",
+    "prettier-plugin-tailwindcss": "^0.5.0"
+  }
+}

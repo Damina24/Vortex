@@ -1,0 +1,484 @@
+// VORTEX AI — Prisma Database Schema
+// Based on the Technical Blueprint v1.0
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Users & Authentication
+// ============================================================
+
+enum UserRole {
+  creator
+  admin
+  viewer
+}
+
+enum SubscriptionTier {
+  free
+  creator
+  pro
+  team
+  enterprise
+}
+
+model User {
+  id                String           @id @default(uuid()) @db.Uuid
+  email             String           @unique @db.VarChar(255)
+  passwordHash      String?          @map("password_hash") @db.VarChar(255)
+  name              String?          @db.VarChar(255)
+  avatarUrl         String?          @map("avatar_url")
+  role              UserRole         @default(creator)
+  subscriptionTier  SubscriptionTier @default(free) @map("subscription_tier")
+  creditsBalance    Int              @default(0) @map("credits_balance")
+  emailVerified     DateTime?        @map("email_verified")
+  image             String?
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  accounts          Account[]
+  sessions          Session[]
+  ownedTeams        Team[]           @relation("TeamOwner")
+  teamMemberships   TeamMember[]
+  projects          Project[]        @relation("ProjectCreator")
+  assets            Asset[]
+  creditTransactions CreditTransaction[]
+  analyticsEvents   AnalyticsEvent[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(uuid()) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refreshToken      String? @map("refresh_token")
+  accessToken       String? @map("access_token")
+  expiresAt         Int?    @map("expires_at")
+  tokenType         String? @map("token_type")
+  scope             String?
+  idToken           String? @map("id_token")
+  sessionState      String? @map("session_state")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id") @db.Uuid
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================
+// Teams & Workspaces
+// ============================================================
+
+enum TeamRole {
+  owner
+  admin
+  editor
+  viewer
+}
+
+model Team {
+  id               String           @id @default(uuid()) @db.Uuid
+  name             String           @db.VarChar(255)
+  ownerId          String           @map("owner_id") @db.Uuid
+  slug             String           @unique @db.VarChar(100)
+  subscriptionTier SubscriptionTier @default(creator) @map("subscription_tier")
+  settings         Json             @default("{}")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  owner            User             @relation("TeamOwner", fields: [ownerId], references: [id])
+  members          TeamMember[]
+  brandDnas        BrandDna[]
+  projects         Project[]
+  assets           Asset[]
+  creditTransactions CreditTransaction[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id       String   @id @default(uuid()) @db.Uuid
+  teamId   String   @map("team_id") @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  role     TeamRole @default(viewer)
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  // Relations
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+// ============================================================
+// Brand DNA
+// ============================================================
+
+model BrandDna {
+  id              String   @id @default(uuid()) @db.Uuid
+  teamId          String   @map("team_id") @db.Uuid
+  name            String   @db.VarChar(255)
+  visualIdentity  Json     @map("visual_identity")
+  voiceTone       Json     @map("voice_tone")
+  complianceRules Json     @default("{}") @map("compliance_rules")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  team   Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@map("brand_dnas")
+}
+
+// ============================================================
+// Projects
+// ============================================================
+
+enum ProjectStatus {
+  draft
+  active
+  paused
+  completed
+  archived
+}
+
+enum ProjectObjective {
+  conversion
+  awareness
+  engagement
+}
+
+model Project {
+  id              String          @id @default(uuid()) @db.Uuid
+  teamId          String          @map("team_id") @db.Uuid
+  brandDnaId      String?         @map("brand_dna_id") @db.Uuid
+  name            String          @db.VarChar(255)
+  description     String?
+  objective       ProjectObjective?
+  status          ProjectStatus   @default(draft)
+  targetPlatforms String[]        @default([]) @map("target_platforms")
+  settings        Json            @default("{}")
+  createdBy       String?         @map("created_by") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  team            Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  brandDna        BrandDna?       @relation(fields: [brandDnaId], references: [id])
+  creator         User?           @relation("ProjectCreator", fields: [createdBy], references: [id])
+  storyboards     Storyboard[]
+  assets          Asset[]
+  campaigns       Campaign[]
+  generationJobs  GenerationJob[]
+  analyticsEvents AnalyticsEvent[]
+
+  @@index([teamId])
+  @@map("projects")
+}
+
+// ============================================================
+// Storyboards & Scenes
+// ============================================================
+
+enum StoryboardStatus {
+  draft
+  active
+  generating
+  completed
+  failed
+}
+
+enum SceneStatus {
+  pending
+  generating
+  completed
+  failed
+}
+
+model Storyboard {
+  id             String           @id @default(uuid()) @db.Uuid
+  projectId      String           @map("project_id") @db.Uuid
+  name           String           @db.VarChar(255)
+  totalDuration  Int              @default(0) @map("total_duration")
+  status         StoryboardStatus @default(draft)
+  aiStrategy     Json?            @map("ai_strategy")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scenes         Scene[]
+  transitions    Transition[]
+
+  @@map("storyboards")
+}
+
+model Scene {
+  id               String      @id @default(uuid()) @db.Uuid
+  storyboardId     String      @map("storyboard_id") @db.Uuid
+  orderIndex       Int         @map("order_index")
+  duration         Int
+  prompt           String
+  negativePrompt   String?     @map("negative_prompt")
+  cameraDirection  Json?       @map("camera_direction")
+  aspectRatio      String      @default("16:9") @map("aspect_ratio")
+  styleReferenceId String?     @map("style_reference_id") @db.Uuid
+  generatedVideoId String?     @map("generated_video_id") @db.Uuid
+  status           SceneStatus @default(pending)
+  generationJobId  String?     @map("generation_job_id")
+  metadata         Json        @default("{}")
+  createdAt        DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  storyboard       Storyboard  @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  styleReference   Asset?      @relation("StyleReference", fields: [styleReferenceId], references: [id])
+  generatedVideo   Asset?      @relation("GeneratedVideo", fields: [generatedVideoId], references: [id])
+  generationJobs   GenerationJob[]
+  outgoingTransitions Transition[] @relation("FromScene")
+  incomingTransitions Transition[] @relation("ToScene")
+
+  @@index([storyboardId])
+  @@map("scenes")
+}
+
+model Transition {
+  id           String @id @default(uuid()) @db.Uuid
+  storyboardId String @map("storyboard_id") @db.Uuid
+  fromSceneId  String @map("from_scene_id") @db.Uuid
+  toSceneId    String @map("to_scene_id") @db.Uuid
+  type         String @default("cut")
+  duration     Int    @default(0)
+
+  // Relations
+  storyboard   Storyboard @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  fromScene    Scene      @relation("FromScene", fields: [fromSceneId], references: [id])
+  toScene      Scene      @relation("ToScene", fields: [toSceneId], references: [id])
+
+  @@map("transitions")
+}
+
+// ============================================================
+// Assets (Videos, Images, Audio)
+// ============================================================
+
+enum AssetType {
+  video
+  image
+  audio
+  document
+}
+
+model Asset {
+  id           String    @id @default(uuid()) @db.Uuid
+  teamId       String    @map("team_id") @db.Uuid
+  projectId    String?   @map("project_id") @db.Uuid
+  name         String    @db.VarChar(255)
+  type         AssetType
+  mimeType     String?   @map("mime_type") @db.VarChar(100)
+  sizeBytes    BigInt?   @map("size_bytes")
+  url          String
+  thumbnailUrl String?   @map("thumbnail_url")
+  duration     Int?
+  width        Int?
+  height       Int?
+  metadata     Json      @default("{}")
+  createdBy    String?   @map("created_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  team         Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project      Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  creator      User?     @relation(fields: [createdBy], references: [id])
+  styleRefScenes Scene[] @relation("StyleReference")
+  generatedScenes Scene[] @relation("GeneratedVideo")
+  campaignVariants CampaignVariant[]
+
+  @@index([teamId])
+  @@map("assets")
+}
+
+// ============================================================
+// Generation Jobs
+// ============================================================
+
+enum JobType {
+  video
+  voice
+  music
+  image
+}
+
+enum JobStatus {
+  queued
+  processing
+  completed
+  failed
+  cancelled
+}
+
+model GenerationJob {
+  id              String    @id @default(uuid()) @db.Uuid
+  projectId       String?   @map("project_id") @db.Uuid
+  sceneId         String?   @map("scene_id") @db.Uuid
+  jobType         JobType   @map("job_type")
+  provider        String    @db.VarChar(50)
+  providerJobId   String?   @map("provider_job_id")
+  status          JobStatus @default(queued)
+  creditsConsumed Int       @default(0) @map("credits_consumed")
+  inputParams     Json
+  outputAssets    Json      @default("[]") @map("output_assets")
+  errorMessage    String?   @map("error_message")
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  project         Project?  @relation(fields: [projectId], references: [id])
+  scene           Scene?    @relation(fields: [sceneId], references: [id])
+  creditTransactions CreditTransaction[]
+
+  @@index([projectId])
+  @@index([status])
+  @@map("generation_jobs")
+}
+
+// ============================================================
+// Campaigns & Publishing
+// ============================================================
+
+enum CampaignStatus {
+  draft
+  active
+  paused
+  completed
+  archived
+}
+
+model Campaign {
+  id                 String         @id @default(uuid()) @db.Uuid
+  projectId          String         @map("project_id") @db.Uuid
+  name               String         @db.VarChar(255)
+  platform           String         @db.VarChar(50)
+  platformCampaignId String?        @map("platform_campaign_id")
+  status             CampaignStatus @default(draft)
+  budget             Decimal?       @db.Decimal(12, 2)
+  spent              Decimal        @default(0) @db.Decimal(12, 2)
+  startDate          DateTime?      @map("start_date")
+  endDate            DateTime?      @map("end_date")
+  targetingConfig    Json           @default("{}") @map("targeting_config")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  project            Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  variants           CampaignVariant[]
+  analyticsEvents    AnalyticsEvent[]
+
+  @@index([projectId])
+  @@map("campaigns")
+}
+
+model CampaignVariant {
+  id                 String   @id @default(uuid()) @db.Uuid
+  campaignId         String   @map("campaign_id") @db.Uuid
+  assetId            String?  @map("asset_id") @db.Uuid
+  variantName        String?  @map("variant_name") @db.VarChar(255)
+  weight             Decimal  @default(0.5) @db.Decimal(3, 2)
+  isWinner           Boolean  @default(false) @map("is_winner")
+  performanceMetrics Json     @default("{}") @map("performance_metrics")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  // Relations
+  campaign           Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  asset              Asset?   @relation(fields: [assetId], references: [id])
+
+  @@map("campaign_variants")
+}
+
+// ============================================================
+// Analytics Events
+// ============================================================
+
+model AnalyticsEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  eventType  String   @map("event_type") @db.VarChar(100)
+  userId     String?  @map("user_id") @db.Uuid
+  projectId  String?  @map("project_id") @db.Uuid
+  campaignId String?  @map("campaign_id") @db.Uuid
+  assetId    String?  @map("asset_id") @db.Uuid
+  platform   String?  @db.VarChar(50)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user       User?    @relation(fields: [userId], references: [id])
+  project    Project? @relation(fields: [projectId], references: [id])
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
+
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("analytics_events")
+}
+
+// ============================================================
+// Credit Transactions
+// ============================================================
+
+enum TransactionType {
+  purchase
+  usage
+  bonus
+  refund
+}
+
+model CreditTransaction {
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @map("user_id") @db.Uuid
+  teamId          String?         @map("team_id") @db.Uuid
+  amount          Int
+  transactionType TransactionType @map("transaction_type")
+  description     String?
+  relatedJobId    String?         @map("related_job_id") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  user            User            @relation(fields: [userId], references: [id])
+  team            Team?           @relation(fields: [teamId], references: [id])
+  generationJob   GenerationJob?  @relation(fields: [relatedJobId], references: [id])
+
+  @@map("credit_transactions")
+}
