@@ -5,7 +5,7 @@ import prisma from "@/lib/db/prisma";
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: "2024-06-20",
+      apiVersion: "2024-04-10",
     })
   : null;
 
@@ -42,8 +42,13 @@ export async function POST(req: Request) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    const packageId = (session.metadata?.packageId || "starter") as keyof typeof creditPackages;
-    const credits = Number(session.metadata?.credits || creditPackages[packageId]?.credits || 0);
+    const packageId =
+      (session.metadata?.packageId || "starter") as keyof typeof creditPackages;
+    const credits = Number(
+      session.metadata?.credits ||
+        creditPackages[packageId]?.credits ||
+        0
+    );
     const userId = session.metadata?.userId;
 
     if (userId) {
@@ -51,7 +56,8 @@ export async function POST(req: Request) {
         where: { id: userId },
         data: {
           creditsBalance: { increment: credits },
-          subscriptionTier: creditPackages[packageId]?.tier || "creator",
+          subscriptionTier:
+            creditPackages[packageId]?.tier || "creator",
         },
       });
     }
