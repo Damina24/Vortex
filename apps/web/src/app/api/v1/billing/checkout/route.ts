@@ -16,7 +16,7 @@ const checkoutPackages = {
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: "2024-06-20",
+      apiVersion: "2024-04-10",
     })
   : null;
 
@@ -43,7 +43,8 @@ export async function POST(req: Request) {
 
     const packageId = validation.data.packageId;
     const pkg = checkoutPackages[packageId];
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
     if (!stripe) {
       return NextResponse.json({
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
     const checkoutSession = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      customer_email: session.user.email,
+      customer_email: session.user.email ?? undefined,
       line_items: [
         {
           price_data: {
@@ -95,9 +96,15 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("Checkout init failed:", error);
+
     return NextResponse.json(
-      { success: false, error: "Unable to initialize checkout" },
-      { status: 500 }
+      {
+        success: false,
+        error: "Unable to initialize checkout",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
