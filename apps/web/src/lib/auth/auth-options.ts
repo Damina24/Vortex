@@ -1,4 +1,4 @@
-import { NextAuthOptions } from "next-auth";
+import { DefaultSession, NextAuthOptions, User } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import GitHubProvider from "next-auth/providers/github";
@@ -13,25 +13,28 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
+
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Email and password are required");
         }
 
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+          where: {
+            email: credentials.email,
+          },
         });
 
         if (!user || !user.passwordHash) {
           throw new Error("Invalid email or password");
         }
 
-        const isValid = await bcrypt.compare(
+        const valid = await bcrypt.compare(
           credentials.password,
           user.passwordHash
         );
 
-        if (!isValid) {
+        if (!valid) {
           throw new Error("Invalid email or password");
         }
 
@@ -46,6 +49,7 @@ export const authOptions: NextAuthOptions = {
         };
       },
     }),
+
     ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
       ? [
           GoogleProvider({
@@ -54,6 +58,7 @@ export const authOptions: NextAuthOptions = {
           }),
         ]
       : []),
+
     ...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
       ? [
           GitHubProvider({
@@ -63,56 +68,62 @@ export const authOptions: NextAuthOptions = {
         ]
       : []),
   ],
+
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id;
-        token.role = (user as Record<string, unknown>).role as string;
-        token.subscriptionTier = (user as Record<string, unknown>)
-          .subscriptionTier as string;
-        token.creditsBalance = (user as Record<string, unknown>)
-          .creditsBalance as number;
+        const u = user as User;
+
+        token.id = u.id;
+        token.role = u.role;
+        token.subscriptionTier = u.subscriptionTier;
+        token.creditsBalance = u.creditsBalance;
       }
+
       return token;
     },
+
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.id as string;
-        (session.user as Record<string, unknown>).role = token.role;
-        (session.user as Record<string, unknown>).subscriptionTier =
-          token.subscriptionTier;
-        (session.user as Record<string, unknown>).creditsBalance =
-          token.creditsBalance;
+        session.user.id = token.id;
+        session.user.role = token.role;
+        session.user.subscriptionTier = token.subscriptionTier;
+        session.user.creditsBalance = token.creditsBalance;
       }
+
       return session;
     },
   },
+
   pages: {
     signIn: "/login",
     newUser: "/register",
   },
+
   session: {
     strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 30 * 24 * 60 * 60,
   },
+
   secret: process.env.NEXTAUTH_SECRET,
 };
 
-// Extend Next-Auth types
+// ===============================
+// Type Extensions
+// ===============================
+
 declare module "next-auth" {
   interface Session {
     user: {
       id: string;
-      email: string;
-      name: string | null;
-      image?: string | null;
       role: string;
       subscriptionTier: string;
       creditsBalance: number;
-    };
+    } & DefaultSession["user"];
   }
 
   interface User {
+    id: string;
     role: string;
     subscriptionTier: string;
     creditsBalance: number;
