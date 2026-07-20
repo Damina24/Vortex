@@ -12,7 +12,7 @@ export default function HomePage() {
       <motion.header
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+        transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] as const }}
         className="border-b bg-background/80 backdrop-blur-md sticky top-0 z-50"
       >
         <div className="container flex h-16 items-center justify-between px-4">
@@ -86,7 +86,7 @@ export default function HomePage() {
             className="mx-auto max-w-4xl text-center"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+            transition={{ duration: 0.7, delay: 0.2, ease: [0.25, 0.1, 0.25, 1] as const }}
           >
             <motion.div
               className="mb-6 inline-flex items-center gap-2 rounded-full border bg-muted/50 px-4 py-1.5 text-sm"
@@ -105,7 +105,7 @@ export default function HomePage() {
                   className="absolute -bottom-2 left-0 h-1 bg-vortex-500/30 rounded-full"
                   initial={{ width: 0 }}
                   animate={{ width: "100%" }}
-                  transition={{ duration: 1, delay: 1.2, ease: [0.25, 0.1, 0.25, 1] }}
+                  transition={{ duration: 1, delay: 1.2, ease: [0.25, 0.1, 0.25, 1] as const }}
                 />
               </span>
             </h1>
@@ -424,7 +424,7 @@ function PricingCard({
           initial={{ opacity: 0, scale: 0.5 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+          transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] as const }}
         >
           {price}
         </motion.span>

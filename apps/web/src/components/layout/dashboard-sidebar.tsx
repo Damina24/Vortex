@@ -75,7 +75,7 @@ const itemVariants = {
     transition: {
       delay: i * 0.05,
       duration: 0.3,
-      ease: [0.25, 0.1, 0.25, 1],
+      ease: [0.25, 0.1, 0.25, 1] as const,
     },
   }),
 };
@@ -88,7 +88,7 @@ export function DashboardSidebar() {
     <motion.aside
       animate={collapsed ? "collapsed" : "expanded"}
       variants={sidebarVariants}
-      transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+      transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] as const }}
       className="flex flex-col border-r bg-background overflow-hidden"
     >
       {/* Logo */}
@@ -165,7 +165,7 @@ export function DashboardSidebar() {
                   <motion.div
                     layoutId="activeTab"
                     className="absolute inset-0 rounded-lg bg-vortex-100 dark:bg-vortex-950"
-                    transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+                    transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] as const }}
                   />
                 )}
                 <item.icon className="h-5 w-5 shrink-0 relative z-10" />
@@ -208,7 +208,7 @@ export function DashboardSidebar() {
                   className="text-lg font-bold"
                   initial={{ scale: 0.5 }}
                   animate={{ scale: 1 }}
-                  transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+                  transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] as const }}
                 >
                   100
                 </motion.p>
