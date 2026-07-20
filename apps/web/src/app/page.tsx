@@ -20,9 +20,7 @@ export default function HomePage() {
             className="flex items-center gap-2"
             whileHover={{ scale: 1.02 }}
           >
-            <div className="h-8 w-8 rounded-lg bg-vortex-600 flex items-center justify-center">
-              <Sparkles className="h-5 w-5 text-white" />
-            </div>
+            <img src="/vortex-logo.svg" alt="VORTEX AI" className="h-8 w-8 shrink-0" />
             <span className="text-xl font-bold">VORTEX AI</span>
           </motion.div>
           <nav className="hidden md:flex items-center gap-6">

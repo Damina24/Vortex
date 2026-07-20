@@ -100,13 +100,7 @@ export function DashboardSidebar() {
             collapsed && "justify-center w-full"
           )}
         >
-          <motion.div
-            className="h-8 w-8 shrink-0 rounded-lg bg-vortex-600 flex items-center justify-center"
-            whileHover={{ scale: 1.1, rotate: [0, -5, 5, 0] }}
-            transition={{ duration: 0.3 }}
-          >
-            <Sparkles className="h-5 w-5 text-white" />
-          </motion.div>
+          <img src="/vortex-logo.svg" alt="VORTEX AI" className="h-8 w-8 shrink-0" />
           <AnimatePresence>
             {!collapsed && (
               <motion.span
