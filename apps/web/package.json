@@ -43,7 +43,8 @@
     "react-hot-toast": "^2.4.1",
     "next-themes": "^0.3.0",
     "uploadthing": "^6.10.0",
-    "@uploadthing/react": "^6.5.0"
+    "@uploadthing/react": "^6.5.0",
+    "framer-motion": "^12.42.2"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",
