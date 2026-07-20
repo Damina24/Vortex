@@ -26,31 +26,41 @@ export function AnimatedSection({
   className,
   delay = 0,
   direction = "up",
-  duration = 0.5,
+  duration = 0.6,
   once = true,
-  distance = 60,
+  distance = 80,
 }: AnimatedSectionProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once, margin: "-50px" });
+  const isInView = useInView(ref, { once, margin: "100px" });
 
-  const directionOffset = directionVariants[direction];
+  const directionOffset =
+    direction === "up"
+      ? { y: distance }
+      : direction === "down"
+        ? { y: -distance }
+        : direction === "left"
+          ? { x: distance }
+          : direction === "right"
+            ? { x: -distance }
+            : { x: 0, y: 0 };
 
   return (
     <motion.div
       ref={ref}
       initial={{
         opacity: 0,
+        scale: 0.97,
         ...directionOffset,
       }}
       animate={
         isInView
-          ? { opacity: 1, x: 0, y: 0 }
-          : { opacity: 0, ...directionOffset }
+          ? { opacity: 1, scale: 1, x: 0, y: 0 }
+          : { opacity: 0, scale: 0.97, ...directionOffset }
       }
       transition={{
         duration,
         delay,
-        ease: [0.25, 0.1, 0.25, 1] as const,
+        ease: [0.25, 0.1, 0.25, 1],
       }}
       className={className}
     >
@@ -69,11 +79,11 @@ interface AnimatedStaggerProps {
 export function AnimatedStagger({
   children,
   className,
-  staggerDelay = 0.1,
+  staggerDelay = 0.12,
   once = true,
 }: AnimatedStaggerProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once, margin: "-50px" });
+  const isInView = useInView(ref, { once, margin: "100px" });
 
   return (
     <motion.div
@@ -113,14 +123,16 @@ export function AnimatedStaggerItem({
       variants={{
         hidden: {
           opacity: 0,
+          scale: 0.97,
           ...directionOffset,
         },
         visible: {
           opacity: 1,
+          scale: 1,
           x: 0,
           y: 0,
           transition: {
-            duration: 0.5,
+            duration: 0.6,
             ease: [0.25, 0.1, 0.25, 1] as const,
           },
         },
@@ -154,7 +166,7 @@ export function AnimatedCounter({
   formatNumber = true,
 }: AnimatedCounterProps) {
   const ref = useRef<HTMLSpanElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-50px" });
+  const isInView = useInView(ref, { once: true, margin: "100px" });
   const motionValue = useMotionValue(from);
   const spring = useSpring(motionValue, {
     stiffness: 50,
