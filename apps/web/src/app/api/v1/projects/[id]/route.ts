@@ -163,3 +163,5 @@ export async function DELETE(
     );
   }
 }
+
+export const dynamic = "force-dynamic";
