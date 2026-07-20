@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth/auth-options";
 import { DashboardSidebar } from "@/components/layout/dashboard-sidebar";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
+import { DashboardContent } from "./dashboard-content";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export default async function DashboardLayout({
       <DashboardSidebar />
       <div className="flex flex-1 flex-col">
         <DashboardHeader user={session.user} />
-        <main className="flex-1 p-6">{children}</main>
+        <DashboardContent>{children}</DashboardContent>
       </div>
     </div>
   );

@@ -1,0 +1,11 @@
+{
+  "name": "vortex-web-wrapper",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cd ../apps/web && npm run dev",
+    "build": "cd ../apps/web && npm ci && npm run build",
+    "start": "cd ../apps/web && npm run start",
+    "lint": "cd ../apps/web && npm run lint"
+  }
+}

@@ -5,12 +5,13 @@ import prisma from "@/lib/db/prisma";
 import Link from "next/link";
 import {
   FolderKanban,
-  Film,
-  BarChart3,
   Plus,
   ArrowRight,
   Sparkles,
+  Film,
+  BarChart3,
 } from "lucide-react";
+import { AnimatedStats } from "@/components/dashboard/animated-stats";
 
 async function getDashboardStats(userId: string) {
   const [
@@ -97,33 +98,13 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={<FolderKanban className="h-5 w-5" />}
-          label="Active Projects"
-          value={stats.projectCount}
-          color="vortex"
-        />
-        <StatCard
-          icon={<Film className="h-5 w-5" />}
-          label="Storyboards"
-          value={stats.storyboardCount}
-          color="blue"
-        />
-        <StatCard
-          icon={<BarChart3 className="h-5 w-5" />}
-          label="Assets Created"
-          value={stats.assetCount}
-          color="green"
-        />
-        <StatCard
-          icon={<Sparkles className="h-5 w-5" />}
-          label="Available Credits"
-          value={session.user.creditsBalance}
-          color="amber"
-        />
-      </div>
+      {/* Animated Stats Grid */}
+      <AnimatedStats
+        projectCount={stats.projectCount}
+        storyboardCount={stats.storyboardCount}
+        assetCount={stats.assetCount}
+        creditsBalance={session.user.creditsBalance}
+      />
 
       {stats.projectCount === 0 && (
         <div className="rounded-2xl border border-vortex-200 bg-vortex-50 p-6 dark:border-vortex-900/60 dark:bg-vortex-950/30">
@@ -216,37 +197,6 @@ export default async function DashboardPage() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-  color,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  color: "vortex" | "blue" | "green" | "amber";
-}) {
-  const colors = {
-    vortex: "bg-vortex-100 text-vortex-600 dark:bg-vortex-950 dark:text-vortex-400",
-    blue: "bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400",
-    green: "bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400",
-    amber: "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400",
-  };
-
-  return (
-    <div className="rounded-xl border p-5">
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${colors[color]}`}>
-          {icon}
-        </div>
-      </div>
-      <p className="text-2xl font-bold">{value.toLocaleString()}</p>
-      <p className="text-sm text-muted-foreground">{label}</p>
     </div>
   );
 }
