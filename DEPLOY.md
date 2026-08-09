@@ -8,10 +8,12 @@ Go to your Vercel project **Settings → Environment Variables** and add these:
 - `DATABASE_URL` — your Postgres connection string
 - `NEXTAUTH_URL` — your live domain, e.g. `https://vortex-ai.vercel.app`
 - `NEXTAUTH_SECRET` — a strong random secret
-- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` — from Google Cloud Console
+- `GOOGLE_CLIENT_ID` — from Google Cloud Console (server-side, used by NextAuth)
 - `GOOGLE_CLIENT_SECRET` — from Google Cloud Console
-- `NEXT_PUBLIC_GITHUB_CLIENT_ID` — from GitHub Developer Settings
+- `GITHUB_CLIENT_ID` — from GitHub Developer Settings (server-side, used by NextAuth)
 - `GITHUB_CLIENT_SECRET` — from GitHub Developer Settings
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` — from Google Cloud Console (client-side, used to show the Google sign-in button)
+- `NEXT_PUBLIC_GITHUB_CLIENT_ID` — from GitHub Developer Settings (client-side, used to show the GitHub sign-in button)
 
 ### Optional
 - `REDIS_URL`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `SUNO_API_KEY`, etc. from `.env.example`

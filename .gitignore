@@ -12,6 +12,9 @@ dist/
 build/
 coverage/
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 # Environment files
 .env
 .env.local

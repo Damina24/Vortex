@@ -16,7 +16,8 @@
   },
   "devDependencies": {
     "prettier": "^3.2.0",
-    "prettier-plugin-tailwindcss": "^0.5.0"
+    "prettier-plugin-tailwindcss": "^0.5.0",
+    "prisma": "^5.14.0"
   },
   "dependencies": {
     "framer-motion": "^12.42.2"
