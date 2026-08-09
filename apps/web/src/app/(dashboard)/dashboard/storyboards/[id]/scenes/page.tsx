@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
+import { SceneActions } from "@/components/scenes/scene-actions";
 import Link from "next/link";
 import { ArrowLeft, Plus, Film } from "lucide-react";
 
@@ -83,8 +84,11 @@ export default async function StoryboardScenesPage({
                 </div>
               </div>
               <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-                <span>{scene.duration}s</span>
-                <span className="capitalize">{scene.status}</span>
+                <span className="flex items-center gap-3">
+                  <span>{scene.duration}s</span>
+                  <span className="capitalize">{scene.status}</span>
+                </span>
+                <SceneActions sceneId={scene.id} storyboardId={params.id} />
               </div>
             </div>
           ))}

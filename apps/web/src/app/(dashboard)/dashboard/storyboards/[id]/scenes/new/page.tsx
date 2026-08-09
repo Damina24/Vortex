@@ -1,71 +1,28 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus } from "lucide-react";
-import toast from "react-hot-toast";
-import axios from "axios";
+import { ArrowLeft, AlertTriangle } from "lucide-react";
+import { SceneForm } from "@/components/scenes/scene-form";
 
-export default function NewScenePage() {
-  const router = useRouter();
+function NewSceneContent() {
   const searchParams = useSearchParams();
   const storyboardId = searchParams.get("storyboardId") || "";
-  const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    orderIndex: 0,
-    duration: 5,
-    prompt: "",
-    negativePrompt: "",
-    cameraDirection: {} as Record<string, unknown>,
-    aspectRatio: "16:9",
-    storyboardId,
-  });
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setIsLoading(true);
-
-    try {
-      if (!formData.storyboardId) {
-        toast.error("Storyboard ID is required");
-        return;
-      }
-
-      const response = await axios.post("/api/v1/scenes", {
-        storyboardId: formData.storyboardId,
-        orderIndex: Number(formData.orderIndex),
-        duration: Number(formData.duration),
-        prompt: formData.prompt,
-        negativePrompt: formData.negativePrompt || undefined,
-        cameraDirection: Object.keys(formData.cameraDirection).length > 0 ? formData.cameraDirection : undefined,
-        aspectRatio: formData.aspectRatio,
-      });
-
-      if (response.data.success) {
-        toast.success("Scene created successfully!");
-        router.push(`/dashboard/storyboards/${formData.storyboardId}`);
-      }
-    } catch (error: unknown) {
-      if (axios.isAxiosError(error) && error.response?.data?.error) {
-        toast.error(error.response.data.error);
-      } else {
-        toast.error("Failed to create scene");
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
       <div>
         <Link
-          href={`/dashboard/storyboards/${storyboardId}`}
+          href={
+            storyboardId
+              ? `/dashboard/storyboards/${storyboardId}`
+              : "/dashboard/storyboards"
+          }
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Storyboard
+          {storyboardId ? "Back to Storyboard" : "Back to Storyboards"}
         </Link>
         <h1 className="text-3xl font-bold tracking-tight">Add Scene</h1>
         <p className="text-muted-foreground">
@@ -73,125 +30,36 @@ export default function NewScenePage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <label htmlFor="orderIndex" className="text-sm font-medium">
-              Scene Order
-            </label>
-            <input
-              id="orderIndex"
-              type="number"
-              min={0}
-              required
-              value={formData.orderIndex}
-              onChange={(e) =>
-                setFormData({ ...formData, orderIndex: parseInt(e.target.value || "0") })
-              }
-              className="w-full rounded-lg border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            <p className="text-xs text-muted-foreground">
-              Position in the storyboard sequence.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="duration" className="text-sm font-medium">
-              Duration (seconds)
-            </label>
-            <input
-              id="duration"
-              type="number"
-              min={1}
-              required
-              value={formData.duration}
-              onChange={(e) =>
-                setFormData({ ...formData, duration: parseInt(e.target.value || "5") })
-              }
-              className="w-full rounded-lg border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            <p className="text-xs text-muted-foreground">
-              How long the scene should play.
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="prompt" className="text-sm font-medium">
-            Scene Prompt
-          </label>
-          <textarea
-            id="prompt"
-            rows={4}
-            required
-            value={formData.prompt}
-            onChange={(e) =>
-              setFormData({ ...formData, prompt: e.target.value })
-            }
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
-            placeholder="A cinematic drone shot over a mountain valley at sunrise..."
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="negativePrompt" className="text-sm font-medium">
-            Negative Prompt
-          </label>
-          <textarea
-            id="negativePrompt"
-            rows={3}
-            value={formData.negativePrompt}
-            onChange={(e) =>
-              setFormData({ ...formData, negativePrompt: e.target.value })
-            }
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
-            placeholder="Blurry footage, poor lighting, distorted text"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="aspectRatio" className="text-sm font-medium">
-            Aspect Ratio
-          </label>
-          <select
-            id="aspectRatio"
-            value={formData.aspectRatio}
-            onChange={(e) =>
-              setFormData({ ...formData, aspectRatio: e.target.value })
-            }
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="16:9">16:9 (Widescreen)</option>
-            <option value="9:16">9:16 (Vertical)</option>
-            <option value="4:5">4:5 (Portrait)</option>
-            <option value="1:1">1:1 (Square)</option>
-          </select>
-        </div>
-
-        <div className="rounded-xl border bg-muted/40 p-4">
-          <p className="text-sm font-medium">Camera Direction</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Optional JSON for shot type, movement, and framing. Keep it simple for now.
+      {storyboardId ? (
+        <SceneForm storyboardId={storyboardId} />
+      ) : (
+        <div className="rounded-xl border border-dashed p-10 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-muted-foreground/50 mb-3" />
+          <p className="text-sm text-muted-foreground">
+            Missing storyboard. Open a storyboard and use “Add Scene” to get started.
           </p>
-        </div>
-
-        <div className="flex items-center gap-4 pt-4">
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-vortex-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            {isLoading ? "Adding..." : "Add Scene"}
-          </button>
           <Link
-            href={`/dashboard/storyboards/${storyboardId}`}
-            className="text-sm text-muted-foreground hover:text-foreground"
+            href="/dashboard/storyboards"
+            className="mt-4 inline-block text-sm font-medium text-vortex-600 hover:text-vortex-700"
           >
-            Cancel
+            Go to Storyboards
           </Link>
         </div>
-      </form>
+      )}
     </div>
+  );
+}
+
+export default function NewScenePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-2xl mx-auto py-16 text-center text-sm text-muted-foreground">
+          Loading...
+        </div>
+      }
+    >
+      <NewSceneContent />
+    </Suspense>
   );
 }

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
-import { ArrowLeft, Plus, Film, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Film } from "lucide-react";
 
 export default async function StoryboardDetailPage({
   params,
@@ -61,6 +61,13 @@ export default async function StoryboardDetailPage({
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href={`/dashboard/storyboards/${params.id}/scenes`}
+              className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium text-muted-foreground hover:border-vortex-500/50 hover:text-foreground transition-colors"
+            >
+              <Film className="h-4 w-4" />
+              Manage Scenes
+            </Link>
             <Link
               href={`/dashboard/storyboards/${params.id}/scenes/new`}
               className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-4 py-2 text-sm font-medium text-white hover:bg-vortex-700 transition-colors"

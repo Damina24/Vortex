@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
+import { recalculateStoryboardDuration } from "@/lib/db/recalculate-storyboard-duration";
 import { z } from "zod";
 
 const updateSceneSchema = z.object({
@@ -111,6 +112,14 @@ export async function PATCH(
       data: validation.data,
     });
 
+    // Keep the storyboard's total duration in sync when the duration changes
+    if (
+      validation.data.duration !== undefined &&
+      validation.data.duration !== existing.duration
+    ) {
+      await recalculateStoryboardDuration(existing.storyboardId);
+    }
+
     return NextResponse.json({ success: true, data: updated });
   } catch (error) {
     console.error("Error updating scene:", error);
@@ -155,6 +164,9 @@ export async function DELETE(
     await prisma.scene.delete({
       where: { id: params.id },
     });
+
+    // Keep the storyboard's total duration in sync
+    await recalculateStoryboardDuration(existing.storyboardId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

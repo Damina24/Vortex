@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
+import { recalculateStoryboardDuration } from "@/lib/db/recalculate-storyboard-duration";
 import { z } from "zod";
 
 const createSceneSchema = z.object({
@@ -128,18 +129,8 @@ export async function POST(req: Request) {
       },
     });
 
-    // Update storyboard total duration
-    const totalDuration = await prisma.scene.aggregate({
-      where: { storyboardId },
-      _sum: { duration: true },
-    });
-
-    await prisma.storyboard.update({
-      where: { id: storyboardId },
-      data: {
-        totalDuration: totalDuration._sum.duration || 0,
-      },
-    });
+    // Keep the storyboard's total duration in sync
+    await recalculateStoryboardDuration(storyboardId);
 
     return NextResponse.json({ success: true, data: scene }, { status: 201 });
   } catch (error) {
