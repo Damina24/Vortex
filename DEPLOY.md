@@ -79,7 +79,21 @@ cd apps/web
 npx prisma migrate deploy
 ```
 
-## 6) Verify
+## 6) Object Storage (MinIO) — avatar & asset uploads
+
+Local dev stores uploads in MinIO (see `docker-compose.yml`). So the browser can
+load uploaded avatars, make the `avatars` prefix publicly readable:
+
+```bash
+docker exec vortex-minio mc alias set local http://localhost:9000 minioadmin minioadmin
+docker exec vortex-minio mc mb --ignore-existing local/vortex-assets
+docker exec vortex-minio mc anonymous set download local/vortex-assets/avatars
+```
+
+For production S3-compatible storage, either make the bucket (or the avatars
+prefix) public, or serve objects through signed URLs / a CDN.
+
+## 7) Verify
 
 - Visit `/register` to create an account
 - Visit `/login` to sign in with email/password
