@@ -1,53 +1,69 @@
+"""VORTEX AI Service — FastAPI application.
+
+LLM-powered creative operations for storyboards:
+- POST /v1/ai/storyboard-strategy — full creative strategy for a storyboard
+- POST /v1/ai/enhance-prompt     — production-ready scene prompt enhancement
+- GET  /health                   — liveness / provider status
 """
-VORTEX AI — AI Service
-Python FastAPI service for AI/ML heavy lifting:
-- Creative Director (LangGraph agent)
-- Performance Prediction (XGBoost)
-- Brand Guard (CLIP + OCR)
-"""
+
+import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import creative_director, prediction, brand_guard
-from src.config.settings import settings
+from .config import get_settings
+from .llm import get_llm
+from .routers import router as ai_router
+
+logger = logging.getLogger("uvicorn.error")
+
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    provider = get_llm()
+    if provider is None:
+        logger.warning(
+            "No LLM provider configured — set OPENAI_API_KEY, ANTHROPIC_API_KEY, "
+            "or MOCK_LLM=true for offline development."
+        )
+    else:
+        logger.info("LLM provider active: %s", provider.__class__.__name__)
+    yield
+
 
 app = FastAPI(
-    title="VORTEX AI Service",
+    title=settings.app_name,
     description="AI/ML service for VORTEX AI — Creative Operating System for Video",
-    version="1.0.0",
+    version=settings.app_version,
+    lifespan=lifespan,
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Health check
+
 @app.get("/health")
-async def health_check():
+def health():
+    provider = get_llm()
     return {
-        "status": "healthy",
+        "status": "ok",
         "service": "vortex-ai-service",
-        "version": "1.0.0",
+        "version": settings.app_version,
+        "provider": provider.__class__.__name__ if provider else "none",
     }
 
-# Routers
-app.include_router(creative_director.router, prefix="/api/v1/ai", tags=["Creative Director"])
-app.include_router(prediction.router, prefix="/api/v1/ai", tags=["Performance Prediction"])
-app.include_router(brand_guard.router, prefix="/api/v1/ai", tags=["Brand Guard"])
+
+app.include_router(ai_router)
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(
-        "src.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-    )
+    uvicorn.run("src.main:app", host="0.0.0.0", port=8000, reload=True)
