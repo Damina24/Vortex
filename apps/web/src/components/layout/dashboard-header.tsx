@@ -9,10 +9,12 @@ import {
   Moon,
   Sun,
   Bell,
+  Sparkles,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState } from "react";
 import { getInitials } from "@/lib/utils";
+import { useLiveCredits } from "@/lib/credits-client";
 
 interface DashboardHeaderProps {
   user: {
@@ -29,6 +31,7 @@ interface DashboardHeaderProps {
 export function DashboardHeader({ user }: DashboardHeaderProps) {
   const { theme, setTheme } = useTheme();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const { balance } = useLiveCredits(user.creditsBalance);
 
   return (
     <motion.header
@@ -54,6 +57,24 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2 }}
       >
+        {/* Credits */}
+        <Link
+          href="/dashboard/credits"
+          title={`${balance.toLocaleString()} credits available`}
+          className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium text-amber-700 hover:border-amber-500/50 transition-colors dark:text-amber-400"
+        >
+          <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+          <motion.span
+            key={balance}
+            initial={{ scale: 1.2 }}
+            animate={{ scale: 1 }}
+            transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] as const }}
+          >
+            {balance.toLocaleString()}
+          </motion.span>
+          <span className="text-muted-foreground">credits</span>
+        </Link>
+
         {/* Subscription Badge */}
         <motion.span
           className="inline-flex items-center rounded-full bg-vortex-100 px-2.5 py-0.5 text-xs font-medium capitalize text-vortex-700 dark:bg-vortex-950 dark:text-vortex-400"

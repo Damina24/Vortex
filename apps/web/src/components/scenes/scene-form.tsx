@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Plus, Save, Sparkles, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import axios from "axios";
+import { notifyCreditsUpdated } from "@/lib/credits-client";
 
 type SceneInput = {
   id: string;
@@ -113,6 +114,7 @@ export function SceneForm({
         prompt: enhancedPrompt,
         negativePrompt: enhancedNegativePrompt,
       }));
+      notifyCreditsUpdated();
       toast.success("Prompt enhanced with AI!");
     } catch (error) {
       const message =

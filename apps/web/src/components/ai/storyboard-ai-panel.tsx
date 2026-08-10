@@ -14,6 +14,7 @@ import {
 import toast from "react-hot-toast";
 import axios from "axios";
 import type { AiStoryboardStrategy } from "@/types";
+import { notifyCreditsUpdated } from "@/lib/credits-client";
 
 /**
  * AI Creative Strategy panel for a storyboard detail page. Generates a full
@@ -64,6 +65,7 @@ export function StoryboardAiPanel({
       );
       setStrategy(response.data.data);
       setApplied(false);
+      notifyCreditsUpdated();
       const credits = response.data?.credits;
       toast.success(
         credits
@@ -121,6 +123,7 @@ export function StoryboardAiPanel({
           <p className="mt-1 text-sm text-muted-foreground">
             Generate a full strategy — audience, tone, direction, and a
             scene-by-scene plan — from this storyboard and its project.
+            Costs 5 credits per generation.
           </p>
         </div>
         <button

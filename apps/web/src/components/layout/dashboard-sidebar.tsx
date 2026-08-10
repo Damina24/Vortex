@@ -18,6 +18,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useLiveCredits } from "@/lib/credits-client";
+
+interface DashboardSidebarProps {
+  creditsBalance: number;
+}
 
 const sidebarItems = [
   {
@@ -80,9 +85,10 @@ const itemVariants = {
   }),
 };
 
-export function DashboardSidebar() {
+export function DashboardSidebar({ creditsBalance }: DashboardSidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { balance } = useLiveCredits(creditsBalance);
 
   return (
     <motion.aside
@@ -193,20 +199,21 @@ export function DashboardSidebar() {
             className="border-t shrink-0"
           >
             <div className="p-4">
-              <motion.div
-                className="rounded-lg bg-muted/50 p-3"
-                whileHover={{ scale: 1.02 }}
+              <Link
+                href="/dashboard/credits"
+                className="block rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted/80"
               >
                 <p className="text-xs text-muted-foreground">Available Credits</p>
                 <motion.p
+                  key={balance}
                   className="text-lg font-bold"
                   initial={{ scale: 0.5 }}
                   animate={{ scale: 1 }}
                   transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] as const }}
                 >
-                  100
+                  {balance.toLocaleString()}
                 </motion.p>
-              </motion.div>
+              </Link>
             </div>
           </motion.div>
         )}

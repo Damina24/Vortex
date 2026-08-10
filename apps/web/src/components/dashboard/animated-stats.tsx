@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { AnimatedCounter } from "@/components/ui/animated-section";
 import { FolderKanban, Film, BarChart3, Sparkles } from "lucide-react";
+import { useLiveCredits } from "@/lib/credits-client";
 
 interface AnimatedStatsProps {
   projectCount: number;
@@ -17,6 +18,8 @@ export function AnimatedStats({
   assetCount,
   creditsBalance,
 }: AnimatedStatsProps) {
+  const { balance } = useLiveCredits(creditsBalance);
+
   const stats = [
     {
       icon: <FolderKanban className="h-5 w-5" />,
@@ -39,7 +42,7 @@ export function AnimatedStats({
     {
       icon: <Sparkles className="h-5 w-5" />,
       label: "Available Credits",
-      value: creditsBalance,
+      value: balance,
       color: "amber" as const,
     },
   ];
