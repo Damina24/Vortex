@@ -3,6 +3,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
 import { AiServiceError, enhanceScenePrompt } from "@/lib/ai/client";
+import {
+  AI_CREDIT_COSTS,
+  InsufficientCreditsError,
+  getCreditsBalance,
+  spendCredits,
+} from "@/lib/credits";
 import { z } from "zod";
 
 const enhancePromptSchema = z
@@ -82,6 +88,18 @@ export async function POST(req: Request) {
       );
     }
 
+    const cost = AI_CREDIT_COSTS.enhancePrompt;
+    const balance = await getCreditsBalance(session.user.id);
+    if (balance < cost) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Prompt enhancement costs ${cost} credit but you only have ${balance}.`,
+        },
+        { status: 402 }
+      );
+    }
+
     const result = await enhanceScenePrompt({
       prompt: promptToEnhance,
       negativePrompt: negativeToEnhance ?? null,
@@ -89,8 +107,28 @@ export async function POST(req: Request) {
       brandContext: brandContext ?? null,
     });
 
-    return NextResponse.json({ success: true, data: result });
+    // Charge the user atomically and record a usage transaction. This runs
+    // after a successful LLM response so users are never charged for failures.
+    const remaining = await spendCredits({
+      userId: session.user.id,
+      amount: cost,
+      description: `AI prompt enhancement ("${promptToEnhance.slice(0, 48)}${
+        promptToEnhance.length > 48 ? "..." : ""
+      }")`,
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: result,
+      credits: { cost, remaining },
+    });
   } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 402 }
+      );
+    }
     if (error instanceof AiServiceError) {
       return NextResponse.json(
         { success: false, error: error.message },

@@ -4,6 +4,12 @@ import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
 import { Prisma } from "@prisma/client";
 import { AiServiceError, generateStoryboardStrategy } from "@/lib/ai/client";
+import {
+  AI_CREDIT_COSTS,
+  InsufficientCreditsError,
+  getCreditsBalance,
+  spendCredits,
+} from "@/lib/credits";
 import type { AiStoryboardStrategyRequest } from "@/types";
 import { z } from "zod";
 
@@ -83,7 +89,27 @@ export async function POST(req: Request) {
       })),
     };
 
+    const cost = AI_CREDIT_COSTS.storyboardStrategy;
+    const balance = await getCreditsBalance(session.user.id);
+    if (balance < cost) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `AI strategy generation costs ${cost} credits but you only have ${balance}.`,
+        },
+        { status: 402 }
+      );
+    }
+
     const strategy = await generateStoryboardStrategy(aiRequest);
+
+    // Charge the user atomically and record a usage transaction. This runs
+    // after a successful LLM response so users are never charged for failures.
+    const remaining = await spendCredits({
+      userId: session.user.id,
+      amount: cost,
+      description: `Generated AI strategy for storyboard "${storyboard.name}"`,
+    });
 
     // Cache the strategy on the storyboard so the detail page can render it
     // without calling the LLM again.
@@ -96,8 +122,18 @@ export async function POST(req: Request) {
       console.error("Failed to persist AI strategy:", persistError);
     }
 
-    return NextResponse.json({ success: true, data: strategy });
+    return NextResponse.json({
+      success: true,
+      data: strategy,
+      credits: { cost, remaining },
+    });
   } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 402 }
+      );
+    }
     if (error instanceof AiServiceError) {
       return NextResponse.json(
         { success: false, error: error.message },

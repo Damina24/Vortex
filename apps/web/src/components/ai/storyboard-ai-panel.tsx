@@ -36,16 +36,42 @@ export function StoryboardAiPanel({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [objective, setObjective] = useState("");
+  const [platformsInput, setPlatformsInput] = useState("");
+  const [brandContext, setBrandContext] = useState("");
 
   async function handleGenerate() {
     setIsGenerating(true);
     try {
-      const response = await axios.post("/api/v1/ai/storyboard-strategy", {
-        storyboardId,
-      });
+      const payload: Record<string, unknown> = { storyboardId };
+      if (objective) {
+        payload.objective = objective;
+      }
+      const platforms = platformsInput
+        .split(",")
+        .map((platform) => platform.trim())
+        .filter(Boolean);
+      if (platforms.length > 0) {
+        payload.targetPlatforms = platforms;
+      }
+      if (brandContext.trim()) {
+        payload.brandContext = brandContext.trim();
+      }
+
+      const response = await axios.post(
+        "/api/v1/ai/storyboard-strategy",
+        payload
+      );
       setStrategy(response.data.data);
       setApplied(false);
-      toast.success("AI strategy generated!");
+      const credits = response.data?.credits;
+      toast.success(
+        credits
+          ? `AI strategy generated (-${credits.cost} credit${
+              credits.cost === 1 ? "" : "s"
+            }, ${credits.remaining} remaining)`
+          : "AI strategy generated!"
+      );
     } catch (error) {
       const message =
         axios.isAxiosError(error) && error.response?.data?.error
@@ -115,6 +141,65 @@ export function StoryboardAiPanel({
               : "Generate Strategy"}
         </button>
       </div>
+
+      <details className="mt-4 text-sm">
+        <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground">
+          Customize the brief (optional)
+        </summary>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label
+              htmlFor="ai-objective"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Objective
+            </label>
+            <select
+              id="ai-objective"
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Use project objective</option>
+              <option value="conversion">Conversion</option>
+              <option value="awareness">Awareness</option>
+              <option value="engagement">Engagement</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label
+              htmlFor="ai-platforms"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Target platforms
+            </label>
+            <input
+              id="ai-platforms"
+              type="text"
+              value={platformsInput}
+              onChange={(e) => setPlatformsInput(e.target.value)}
+              placeholder="youtube, tiktok, instagram"
+              className="w-full rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          <label
+            htmlFor="ai-brand-context"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Brand context
+          </label>
+          <textarea
+            id="ai-brand-context"
+            rows={2}
+            value={brandContext}
+            onChange={(e) => setBrandContext(e.target.value)}
+            placeholder="Modern, bold, high contrast. Avoid wordy UI screenshots."
+            className="w-full rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+          />
+        </div>
+      </details>
 
       {strategy ? (
         <div className="mt-6 space-y-6">

@@ -99,3 +99,47 @@ prefix) public, or serve objects through signed URLs / a CDN.
 - Visit `/login` to sign in with email/password
 - Google/GitHub buttons should appear after adding OAuth env vars
 - After login, you should redirect to `/dashboard`
+## 8) AI Service (LLM-powered creative tools)
+
+The web app delegates AI work to the FastAPI microservice in `apps/ai-service`
+(strategy generation + scene prompt enhancement). Calls are proxied server-side
+through the web app's `/api/v1/ai/*` routes, so LLM keys never reach the browser.
+
+### Environment variables
+
+On Vercel (web app):
+- `AI_SERVICE_URL` — base URL of the running AI service, e.g.
+  `https://ai-service.your-domain.com` (or `http://localhost:8000` locally).
+
+On the AI service itself:
+- `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` — LLM provider keys
+- `MOCK_LLM=true` — deterministic offline responses (development/testing only)
+
+Provider resolution order: Mock → OpenAI → Anthropic. If none is configured,
+the AI endpoints return `503`.
+
+### Deploying the service
+
+Local (with Docker):
+```bash
+docker compose up --build ai-service    # listens on :8000
+```
+
+Without Docker:
+```bash
+cd apps/ai-service
+python -m venv .venv && . .venv/Scripts/Activate.ps1
+pip install -r requirements-dev.txt
+MOCK_LLM=true uvicorn src.main:app --reload
+```
+
+For production, deploy `apps/ai-service` (it ships with a `Dockerfile`) to any
+container host — Railway, Render, Fly.io, EC2, etc. — then set `AI_SERVICE_URL`
+on Vercel to point at it.
+
+### Credit costs
+
+AI calls charge usage credits (atomic debit + a `credit_transactions` "usage"
+row): **5 credits** per storyboard strategy, **1 credit** per prompt enhancement.
+New accounts start with a 100-credit signup bonus. Users with insufficient
+credits get a `402 Payment Required` response with a clear message.
