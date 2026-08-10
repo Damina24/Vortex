@@ -4,6 +4,8 @@ import Link from "next/link";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
 import { ArrowLeft, Plus, Film } from "lucide-react";
+import { StoryboardAiPanel } from "@/components/ai/storyboard-ai-panel";
+import type { AiStoryboardStrategy } from "@/types";
 
 export default async function StoryboardDetailPage({
   params,
@@ -101,6 +103,18 @@ export default async function StoryboardDetailPage({
           </p>
         </div>
       </div>
+
+      {/* AI Strategy */}
+      <StoryboardAiPanel
+        storyboardId={storyboard.id}
+        startIndex={
+          storyboard.scenes.reduce(
+            (max, scene) => Math.max(max, scene.orderIndex),
+            -1
+          ) + 1
+        }
+        initialStrategy={storyboard.aiStrategy as AiStoryboardStrategy | null}
+      />
 
       {/* Scenes */}
       <div>

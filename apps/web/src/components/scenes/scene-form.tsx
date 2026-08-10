@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Save } from "lucide-react";
+import { Plus, Save, Sparkles, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import axios from "axios";
 
@@ -31,6 +31,7 @@ export function SceneForm({
   const router = useRouter();
   const isEdit = Boolean(scene);
   const [isLoading, setIsLoading] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
   const [formData, setFormData] = useState({
     orderIndex: scene?.orderIndex ?? 0,
     duration: scene?.duration ?? 5,
@@ -79,6 +80,48 @@ export function SceneForm({
       }
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  /**
+   * Calls the AI service (via /api/v1/ai/enhance-prompt) to upgrade the current
+   * scene prompt into a production-ready generation prompt, then fills the form
+   * fields with the enhanced version.
+   */
+  async function handleEnhance() {
+    if (!formData.prompt.trim()) {
+      toast.error("Write a scene prompt first, then enhance it");
+      return;
+    }
+
+    setIsEnhancing(true);
+    try {
+      const payload: Record<string, unknown> = {
+        prompt: formData.prompt,
+        negativePrompt: formData.negativePrompt || undefined,
+        aspectRatio: formData.aspectRatio,
+      };
+      if (scene) {
+        payload.sceneId = scene.id;
+      }
+
+      const response = await axios.post("/api/v1/ai/enhance-prompt", payload);
+      const { enhancedPrompt, enhancedNegativePrompt } = response.data.data;
+
+      setFormData((prev) => ({
+        ...prev,
+        prompt: enhancedPrompt,
+        negativePrompt: enhancedNegativePrompt,
+      }));
+      toast.success("Prompt enhanced with AI!");
+    } catch (error) {
+      const message =
+        axios.isAxiosError(error) && error.response?.data?.error
+          ? error.response.data.error
+          : "Failed to enhance prompt";
+      toast.error(message);
+    } finally {
+      setIsEnhancing(false);
     }
   }
 
@@ -133,9 +176,24 @@ export function SceneForm({
       </div>
 
       <div className="space-y-2">
-        <label htmlFor="prompt" className="text-sm font-medium">
-          Scene Prompt
-        </label>
+        <div className="flex items-center justify-between">
+          <label htmlFor="prompt" className="text-sm font-medium">
+            Scene Prompt
+          </label>
+          <button
+            type="button"
+            onClick={handleEnhance}
+            disabled={isEnhancing || !formData.prompt.trim()}
+            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-vortex-600 hover:bg-vortex-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:text-vortex-400 dark:hover:bg-vortex-950/50"
+          >
+            {isEnhancing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {isEnhancing ? "Enhancing..." : "Enhance with AI"}
+          </button>
+        </div>
         <textarea
           id="prompt"
           rows={4}

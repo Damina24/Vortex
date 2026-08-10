@@ -305,3 +305,52 @@ export interface TeamMemberData {
   role: "owner" | "admin" | "editor" | "viewer";
   joinedAt: string;
 }
+// ============================================================
+// AI Service (apps/ai-service) Types
+// Mirrors the FastAPI schemas in apps/ai-service/src/schemas.py
+// ============================================================
+
+export interface AiSceneContext {
+  orderIndex: number;
+  prompt: string;
+  duration?: number | null;
+  aspectRatio?: string | null;
+}
+
+export interface AiStoryboardStrategyRequest {
+  storyboardName: string;
+  projectName?: string | null;
+  projectDescription?: string | null;
+  objective?: string | null;
+  targetPlatforms?: string[];
+  brandContext?: string | null;
+  scenes: AiSceneContext[];
+}
+
+export interface AiScenePlanItem {
+  orderIndex: number;
+  goal: string;
+  suggestedPrompt: string;
+  notes?: string;
+}
+
+export interface AiStoryboardStrategy {
+  summary: string;
+  targetAudience: string;
+  tone: string;
+  creativeDirection: string;
+  scenePlan: AiScenePlanItem[];
+  distributionNotes: string;
+}
+
+export interface AiEnhancePromptRequest {
+  prompt: string;
+  negativePrompt?: string | null;
+  aspectRatio?: string | null;
+  brandContext?: string | null;
+}
+
+export interface AiEnhancePromptResult {
+  enhancedPrompt: string;
+  enhancedNegativePrompt: string;
+}
