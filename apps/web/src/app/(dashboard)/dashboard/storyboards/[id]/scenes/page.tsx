@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
 import { SceneActions } from "@/components/scenes/scene-actions";
+import { ScenePromptEnhancer } from "@/components/scenes/scene-prompt-enhancer";
 import Link from "next/link";
 import { ArrowLeft, Plus, Film } from "lucide-react";
 
@@ -83,6 +84,8 @@ export default async function StoryboardScenesPage({
                   </p>
                 </div>
               </div>
+              <ScenePromptEnhancer sceneId={scene.id} />
+
               <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-3">
                   <span>{scene.duration}s</span>

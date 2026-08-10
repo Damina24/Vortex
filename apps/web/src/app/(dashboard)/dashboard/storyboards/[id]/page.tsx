@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
 import { ArrowLeft, Plus, Film } from "lucide-react";
 import { StoryboardAiPanel } from "@/components/ai/storyboard-ai-panel";
+import { ScenePromptEnhancer } from "@/components/scenes/scene-prompt-enhancer";
 import type { AiStoryboardStrategy } from "@/types";
 
 export default async function StoryboardDetailPage({
@@ -144,6 +145,8 @@ export default async function StoryboardDetailPage({
                     </span>
                   </div>
                 </div>
+                <ScenePromptEnhancer sceneId={scene.id} />
+
               </div>
             ))}
           </div>
