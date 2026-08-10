@@ -143,3 +143,47 @@ AI calls charge usage credits (atomic debit + a `credit_transactions` "usage"
 row): **5 credits** per storyboard strategy, **1 credit** per prompt enhancement.
 New accounts start with a 100-credit signup bonus. Users with insufficient
 credits get a `402 Payment Required` response with a clear message.
+
+## 9) Billing (credit purchases via Stripe)
+
+Users buy credit packages (Starter 250 / $19, Pro 1000 / $49, Business
+5000 / $149) to refill their balance. The two endpoints and the shared
+package/ledger logic live in `apps/web/src`:
+
+- `POST /api/v1/billing/checkout` — creates a Stripe Checkout Session and
+  returns its URL. Prices/credits are read from the single-source-of-truth
+  `src/lib/billing/packages.ts`.
+- `POST /api/v1/billing/webhook` — verifies the Stripe signature and, on
+  `checkout.session.completed`, atomically:
+  1. inserts a `credit_transactions` row of type `purchase` (`+N` credits),
+  2. increments the user's `creditsBalance` and bumps `subscriptionTier`.
+  The transaction primary key is derived deterministically (UUID v5) from the
+  Stripe session id, so **retried deliveries are idempotent** — duplicate
+  events collide on the primary key and are skipped instead of double-crediting.
+- `GET /api/v1/billing/transactions` — last 25 ledger rows shown on the
+  credits page (`/dashboard/credits`), which also shows the live balance.
+
+### Environment variables (web app)
+
+- `STRIPE_SECRET_KEY` — Stripe secret key.
+- `STRIPE_WEBHOOK_SECRET` — signing secret for the webhook.
+- `NEXT_PUBLIC_APP_URL` — absolute public URL used in success/cancel URLs.
+
+### Demo / no-payment mode
+
+When `STRIPE_SECRET_KEY` is **not** set, `POST /api/v1/billing/checkout`
+completes the purchase immediately (same `addPurchaseCredits` helper the
+webhook uses, recorded as a "Demo purchase" transaction) so the full flow works
+locally without payment keys. This mode is only active while Stripe is
+unconfigured — set the keys above to switch to real payments.
+
+### Stripe webhook setup
+
+1. In the Stripe Dashboard → *Webhooks*, add an endpoint pointing at
+   `{NEXT_PUBLIC_APP_URL}/api/v1/billing/webhook`.
+2. Subscribe to the **`checkout.session.completed`** event (others can be
+   safely ignored).
+3. Copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
+
+The legacy `POST /api/v1/billing/credits` endpoint (which granted credits with
+no payment) has been removed.

@@ -2,9 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles, CreditCard, CheckCircle2 } from "lucide-react";
+import {
+  Sparkles,
+  CreditCard,
+  CheckCircle2,
+  History,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Loader2,
+} from "lucide-react";
 import axios from "axios";
 import toast from "react-hot-toast";
+import { useLiveCredits } from "@/lib/credits-client";
 
 const packages = [
   {
@@ -33,18 +42,67 @@ const packages = [
   },
 ] as const;
 
+interface CreditTransaction {
+  id: string;
+  amount: number;
+  transactionType: "purchase" | "usage" | "bonus" | "refund";
+  description: string | null;
+  createdAt: string;
+}
+
+const transactionMeta: Record<
+  CreditTransaction["transactionType"],
+  { label: string; isCredit: boolean }
+> = {
+  purchase: { label: "Added", isCredit: true },
+  bonus: { label: "Bonus", isCredit: true },
+  usage: { label: "Used", isCredit: false },
+  refund: { label: "Refunded", isCredit: true },
+};
+
 export default function CreditsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [selectedPackage, setSelectedPackage] = useState<(typeof packages)[number]["id"]>("pro");
+  const { balance } = useLiveCredits(0);
+
+  const [selectedPackage, setSelectedPackage] =
+    useState<(typeof packages)[number]["id"]>("pro");
   const [isLoading, setIsLoading] = useState(false);
+  const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
 
   useEffect(() => {
-    if (searchParams.get("checkout") === "success") {
-      toast.success("Payment confirmed. Your credits are on the way.");
+    const status = searchParams.get("checkout");
+    if (status === "success") {
+      toast.success("Payment confirmed. Your credits have been added.");
+      router.replace("/dashboard/credits");
+    } else if (status === "cancelled") {
+      toast("Checkout cancelled — no credits were charged.");
       router.replace("/dashboard/credits");
     }
   }, [router, searchParams]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadTransactions() {
+      try {
+        const response = await axios.get("/api/v1/billing/transactions");
+        if (active) {
+          setTransactions(response.data?.data ?? []);
+        }
+      } catch {
+        setTransactions([]);
+      } finally {
+        if (active) {
+          setIsLoadingTransactions(false);
+        }
+      }
+    }
+    loadTransactions();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handlePurchase() {
     setIsLoading(true);
@@ -74,6 +132,19 @@ export default function CreditsPage() {
         <p className="max-w-2xl text-sm text-muted-foreground">
           Keep your campaigns moving by purchasing credits for storyboards, creative direction, and fast iteration when you need more output.
         </p>
+      </div>
+
+      {/* Current balance */}
+      <div className="rounded-2xl border bg-gradient-to-br from-vortex-50 to-transparent p-6 dark:from-vortex-950">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-vortex-100 dark:bg-vortex-950">
+            <Sparkles className="h-6 w-6 text-vortex-600 dark:text-vortex-400" />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Available credits</p>
+            <p className="text-3xl font-bold">{balance.toLocaleString()}</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -129,6 +200,75 @@ export default function CreditsPage() {
             {isLoading ? "Processing..." : "Buy Credits"}
           </button>
         </div>
+      </div>
+
+      {/* Transaction history */}
+      <div className="rounded-2xl border bg-background p-6 shadow-sm">
+        <div className="mb-2 flex items-center gap-2">
+          <History className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Transaction History</h2>
+        </div>
+
+        {isLoadingTransactions ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading transactions…
+          </div>
+        ) : transactions.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No transactions yet. Purchases and AI usage will show up here.
+          </p>
+        ) : (
+          <div className="divide-y">
+            {transactions.map((tx) => {
+              const meta = transactionMeta[tx.transactionType];
+              const Icon = meta.isCredit ? ArrowDownLeft : ArrowUpRight;
+              return (
+                <div
+                  key={tx.id}
+                  className="flex items-center justify-between gap-4 py-3"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                        meta.isCredit
+                          ? "bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400"
+                          : "bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {tx.description || meta.label}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {meta.label} ·{" "}
+                        {new Date(tx.createdAt).toLocaleString(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`text-sm font-semibold ${
+                      meta.isCredit
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-red-600 dark:text-red-400"
+                    }`}
+                  >
+                    {meta.isCredit ? "+" : "−"}
+                    {Math.abs(tx.amount).toLocaleString()}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

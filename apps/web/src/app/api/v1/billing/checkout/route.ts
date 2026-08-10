@@ -3,16 +3,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth-options";
 import { z } from "zod";
 import Stripe from "stripe";
+import { CREDIT_PACKAGES } from "@/lib/billing/packages";
+import { addPurchaseCredits } from "@/lib/credits";
 
 const checkoutSchema = z.object({
   packageId: z.enum(["starter", "pro", "business"]),
 });
-
-const checkoutPackages = {
-  starter: { name: "Starter", price: 1900, credits: 250 },
-  pro: { name: "Pro", price: 4900, credits: 1000 },
-  business: { name: "Business", price: 14900, credits: 5000 },
-} as const;
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -20,6 +16,15 @@ const stripe = process.env.STRIPE_SECRET_KEY
     })
   : null;
 
+/**
+ * Starts the credit purchase flow. When Stripe is configured, creates a real
+ * Checkout Session and returns its URL; the credits are granted by the webhook
+ * when payment completes.
+ *
+ * When Stripe is NOT configured (local development / demo), completes the
+ * purchase immediately using the same `addPurchaseCredits` helper the webhook
+ * uses, so the demo flow works end-to-end without payment keys.
+ */
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -42,18 +47,27 @@ export async function POST(req: Request) {
     }
 
     const packageId = validation.data.packageId;
-    const pkg = checkoutPackages[packageId];
+    const pkg = CREDIT_PACKAGES[packageId];
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
     if (!stripe) {
+      // Demo mode: grant instantly, mirroring what the webhook would do.
+      const creditsBalance = await addPurchaseCredits({
+        userId: session.user.id,
+        credits: pkg.credits,
+        subscriptionTier: pkg.tier,
+        description: `Demo purchase — ${pkg.name} (${pkg.credits.toLocaleString()} credits)`,
+      });
+
       return NextResponse.json({
         success: true,
         data: {
           packageId,
           packageName: pkg.name,
-          amount: pkg.price,
+          amount: pkg.unitAmount,
           credits: pkg.credits,
+          creditsBalance,
           checkoutUrl: `${appUrl}/dashboard/credits?checkout=success&package=${packageId}`,
         },
       });
@@ -67,7 +81,7 @@ export async function POST(req: Request) {
         {
           price_data: {
             currency: "usd",
-            unit_amount: pkg.price,
+            unit_amount: pkg.unitAmount,
             product_data: {
               name: `VORTEX AI credits — ${pkg.name}`,
             },
@@ -89,7 +103,7 @@ export async function POST(req: Request) {
       data: {
         packageId,
         packageName: pkg.name,
-        amount: pkg.price,
+        amount: pkg.unitAmount,
         credits: pkg.credits,
         checkoutUrl: checkoutSession.url,
       },

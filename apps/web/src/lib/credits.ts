@@ -1,5 +1,6 @@
+import { createHash } from "crypto";
 import prisma from "@/lib/db/prisma";
-import { TransactionType } from "@prisma/client";
+import { Prisma, TransactionType, type SubscriptionTier } from "@prisma/client";
 
 /**
  * Credit costs for AI-powered operations. Charged to the user's
@@ -79,4 +80,90 @@ export async function spendCredits(opts: {
 
     return updated.creditsBalance;
   });
+}
+
+/** RFC 4122 namespace used to derive deterministic purchase transaction ids. */
+const CREDIT_TX_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"; // DNS
+
+/**
+ * Deterministic UUID v5 (SHA-1). Credit purchase transactions use an id
+ * derived from the Stripe checkout session so that duplicate webhook
+ * deliveries collide on the `credit_transactions` primary key instead of
+ * crediting a user twice.
+ */
+function uuidv5(name: string, namespace: string = CREDIT_TX_NAMESPACE): string {
+  const ns = Buffer.from(namespace.replaceAll("-", ""), "hex");
+  const digest = createHash("sha1")
+    .update(ns)
+    .update(Buffer.from(name, "utf8"))
+    .digest();
+  const bytes = Buffer.from(digest.subarray(0, 16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50; // version 5
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
+    16,
+    20
+  )}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Add purchased credits to a user's balance and record a "purchase"
+ * `CreditTransaction` in the same DB transaction.
+ *
+ * When `dedupeKey` is supplied (e.g. a Stripe checkout session id), the
+ * transaction primary key is derived deterministically from it, so a
+ * duplicate webhook delivery fails with a unique-constraint error (P2002) and
+ * is treated as already-processed instead of crediting twice.
+ *
+ * Returns the new balance, or `null` if the purchase was already recorded.
+ */
+export async function addPurchaseCredits(opts: {
+  userId: string;
+  credits: number;
+  subscriptionTier: SubscriptionTier;
+  description: string;
+  dedupeKey?: string;
+}): Promise<number | null> {
+  const { userId, credits, subscriptionTier, description, dedupeKey } = opts;
+
+  if (credits <= 0) {
+    throw new Error("credits must be a positive number");
+  }
+
+  const id = dedupeKey ? uuidv5(`purchase:${userId}:${dedupeKey}`) : undefined;
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.creditTransaction.create({
+        data: {
+          id,
+          userId,
+          amount: credits,
+          transactionType: TransactionType.purchase,
+          description,
+        },
+      });
+
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          creditsBalance: { increment: credits },
+          subscriptionTier,
+        },
+        select: { creditsBalance: true },
+      });
+
+      return updated.creditsBalance;
+    });
+  } catch (error) {
+    // Unique constraint on the deterministic id => already processed.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }

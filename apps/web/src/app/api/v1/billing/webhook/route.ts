@@ -1,7 +1,8 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import prisma from "@/lib/db/prisma";
+import { CREDIT_PACKAGES } from "@/lib/billing/packages";
+import { addPurchaseCredits } from "@/lib/credits";
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -9,12 +10,14 @@ const stripe = process.env.STRIPE_SECRET_KEY
     })
   : null;
 
-const creditPackages = {
-  starter: { credits: 250, tier: "creator" },
-  pro: { credits: 1000, tier: "creator" },
-  business: { credits: 5000, tier: "team" },
-} as const;
-
+/**
+ * Handles Stripe events. On `checkout.session.completed` it atomically credits
+ * the buyer with the purchased package's credits, bumps their subscription
+ * tier, and records a "purchase" `CreditTransaction` — all in one DB
+ * transaction. The transaction rows are keyed deterministically by the Stripe
+ * checkout session id, so retried deliveries are idempotent and can never
+ * double-credit a user.
+ */
 export async function POST(req: Request) {
   if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
     return new NextResponse("Stripe webhook not configured", { status: 400 });
@@ -42,24 +45,35 @@ export async function POST(req: Request) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    const packageId =
-      (session.metadata?.packageId || "starter") as keyof typeof creditPackages;
-    const credits = Number(
-      session.metadata?.credits ||
-        creditPackages[packageId]?.credits ||
-        0
-    );
     const userId = session.metadata?.userId;
+    const packageId = (
+      session.metadata?.packageId ?? "starter"
+    ) as keyof typeof CREDIT_PACKAGES;
+    const pkg = CREDIT_PACKAGES[packageId] ?? CREDIT_PACKAGES.starter;
+    const credits = Number(session.metadata?.credits || pkg.credits);
 
-    if (userId) {
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          creditsBalance: { increment: credits },
-          subscriptionTier:
-            creditPackages[packageId]?.tier || "creator",
-        },
+    if (!userId) {
+      console.error(
+        `Webhook: checkout.session.completed for session ${session.id} had no userId — skipping.`
+      );
+    } else {
+      const balance = await addPurchaseCredits({
+        userId,
+        credits,
+        subscriptionTier: pkg.tier,
+        description: `Stripe purchase #${session.id} — ${pkg.name} (${credits.toLocaleString()} credits)`,
+        dedupeKey: session.id,
       });
+
+      if (balance === null) {
+        console.log(
+          `Webhook: purchase for session ${session.id} already processed — skipping (idempotent).`
+        );
+      } else {
+        console.log(
+          `Webhook: credited ${credits} credits to user ${userId}; new balance ${balance}.`
+        );
+      }
     }
   }
 
