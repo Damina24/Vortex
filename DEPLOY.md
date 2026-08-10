@@ -174,8 +174,20 @@ package/ledger logic live in `apps/web/src`:
 When `STRIPE_SECRET_KEY` is **not** set, `POST /api/v1/billing/checkout`
 completes the purchase immediately (same `addPurchaseCredits` helper the
 webhook uses, recorded as a "Demo purchase" transaction) so the full flow works
-locally without payment keys. This mode is only active while Stripe is
-unconfigured — set the keys above to switch to real payments.
+locally without payment keys. On the credits page such purchases are confirmed
+in place: the ledger refreshes, the balance broadcast updates the
+header/sidebar/dashboard stats immediately, and no Stripe redirect happens.
+Set the keys above to switch to real payments.
+
+### Purchase verification after Stripe payment
+
+After a real Stripe payment the user is redirected back to
+`/dashboard/credits?checkout=success`, but the webhook can lag a few seconds
+behind. The credits page therefore polls
+`GET /api/v1/billing/transactions` (every 1.5s, up to ~60s) until a
+`purchase` ledger row created around page-load appears, then shows the
+confirmation toast and broadcasts the balance update — so the UI never claims
+credits were added before the webhook actually granted them.
 
 ### Stripe webhook setup
 

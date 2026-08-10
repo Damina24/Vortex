@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles,
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import toast from "react-hot-toast";
-import { useLiveCredits } from "@/lib/credits-client";
+import { notifyCreditsUpdated, useLiveCredits } from "@/lib/credits-client";
 
 const packages = [
   {
@@ -70,39 +70,93 @@ export default function CreditsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
+  const [awaitingCredits, setAwaitingCredits] = useState(false);
+  // When the user is bounced back from Stripe Checkout the webhook may still
+  // be granting credits; we detect the new "purchase" ledger row relative to
+  // when this page loaded.
+  const pageLoadStartedAt = useRef(Date.now());
 
+  const loadTransactions = useCallback(async () => {
+    try {
+      const response = await axios.get("/api/v1/billing/transactions");
+      const next = (response.data?.data ?? []) as CreditTransaction[];
+      setTransactions(next);
+      return next;
+    } catch {
+      setTransactions([]);
+      return [];
+    }
+  }, []);
+
+  // Initial ledger load.
+  useEffect(() => {
+    let active = true;
+    setIsLoadingTransactions(true);
+    loadTransactions().finally(() => {
+      if (active) setIsLoadingTransactions(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [loadTransactions]);
+
+  // Returning from Stripe Checkout (success/cancel) is signalled via the
+  // `checkout` query parameter.
   useEffect(() => {
     const status = searchParams.get("checkout");
     if (status === "success") {
-      toast.success("Payment confirmed. Your credits have been added.");
-      router.replace("/dashboard/credits");
+      toast.success("Payment confirmed — verifying your credits…");
+      router.replace("/dashboard/credits", { scroll: false });
+      setAwaitingCredits(true);
     } else if (status === "cancelled") {
       toast("Checkout cancelled — no credits were charged.");
       router.replace("/dashboard/credits");
     }
   }, [router, searchParams]);
 
+  // In live Stripe mode the credits are granted by the webhook, which can lag
+  // a few seconds behind the success redirect. Poll until the new "purchase"
+  // ledger row created around the time this page loaded appears, then
+  // broadcast the update so the header/sidebar/dashboard stay in sync.
   useEffect(() => {
-    let active = true;
-    async function loadTransactions() {
-      try {
-        const response = await axios.get("/api/v1/billing/transactions");
-        if (active) {
-          setTransactions(response.data?.data ?? []);
-        }
-      } catch {
-        setTransactions([]);
-      } finally {
-        if (active) {
-          setIsLoadingTransactions(false);
+    if (!awaitingCredits) return;
+
+    let cancelled = false;
+    let attempts = 0;
+
+    async function verifyPurchase() {
+      if (cancelled) return;
+
+      const next = await loadTransactions();
+      const confirmed = next.some(
+        (tx) =>
+          tx.transactionType === "purchase" &&
+          new Date(tx.createdAt).getTime() >=
+            pageLoadStartedAt.current - 60_000
+      );
+
+      if (confirmed) {
+        setAwaitingCredits(false);
+        notifyCreditsUpdated();
+        toast.success("Credits added to your balance.");
+      } else {
+        attempts += 1;
+        if (attempts >= 40) {
+          // ~60s of polling. The webhook may still land — balances keep
+          // refreshing on mount either way.
+          setAwaitingCredits(false);
+          toast("If your credits don't appear shortly, contact support.");
+        } else {
+          window.setTimeout(verifyPurchase, 1500);
         }
       }
     }
-    loadTransactions();
+
+    window.setTimeout(verifyPurchase, 1500);
     return () => {
-      active = false;
+      cancelled = true;
     };
-  }, []);
+  }, [awaitingCredits, loadTransactions]);
 
   async function handlePurchase() {
     setIsLoading(true);
@@ -112,10 +166,36 @@ export default function CreditsPage() {
         packageId: selectedPackage,
       });
 
-      if (response.data.success && response.data.data?.checkoutUrl) {
-        window.location.assign(response.data.data.checkoutUrl);
+      if (!response.data?.success) {
+        toast.error(response.data?.error || "Purchase failed");
+        return;
+      }
+
+      const data = response.data.data;
+      if (!data) {
+        toast.error("Checkout could not be started.");
+        return;
+      }
+
+      // Demo mode (no Stripe configured): the checkout route granted the
+      // credits immediately, so confirm in place and refresh the ledger /
+      // balance everywhere instead of round-tripping through a redirect.
+      if (typeof data.creditsBalance === "number") {
+        await loadTransactions();
+        notifyCreditsUpdated();
+        toast.success(
+          `Demo purchase complete — ${data.credits.toLocaleString()} credits added.`
+        );
+        return;
+      }
+
+      // Real Stripe Checkout: hand off to Stripe, then return via the
+      // `checkout=success` query parameter, which triggers the verification
+      // poll above (the webhook grants the credits).
+      if (data.checkoutUrl) {
+        window.location.assign(data.checkoutUrl);
       } else {
-        toast.error(response.data.error || "Purchase failed");
+        toast.error("Checkout could not be started.");
       }
     } catch (error) {
       toast.error("Unable to start checkout right now");
@@ -145,6 +225,12 @@ export default function CreditsPage() {
             <p className="text-3xl font-bold">{balance.toLocaleString()}</p>
           </div>
         </div>
+        {awaitingCredits && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg bg-vortex-50 px-3 py-2 text-sm text-vortex-700 dark:bg-vortex-950 dark:text-vortex-300">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Verifying your purchase — credits will appear here shortly.
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -193,11 +279,15 @@ export default function CreditsPage() {
           </div>
           <button
             onClick={handlePurchase}
-            disabled={isLoading}
+            disabled={isLoading || awaitingCredits}
             className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-vortex-700 disabled:opacity-50"
           >
             <CreditCard className="h-4 w-4" />
-            {isLoading ? "Processing..." : "Buy Credits"}
+            {awaitingCredits
+              ? "Verifying…"
+              : isLoading
+                ? "Processing..."
+                : "Buy Credits"}
           </button>
         </div>
       </div>
