@@ -15,6 +15,15 @@ export function notifyCreditsUpdated() {
   window.dispatchEvent(new CustomEvent(CREDITS_UPDATED_EVENT));
 }
 
+/**
+ * True when an API call failed because the user ran out of credits. The
+ * server-side AI routes return HTTP 402 with a human-readable message in
+ * `error.response.data.error`.
+ */
+export function isInsufficientCreditsError(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 402;
+}
+
 async function fetchLiveCreditsBalance(): Promise<number | null> {
   try {
     const response = await axios.get("/api/v1/me");

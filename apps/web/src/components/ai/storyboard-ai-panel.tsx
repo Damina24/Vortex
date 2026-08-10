@@ -14,7 +14,8 @@ import {
 import toast from "react-hot-toast";
 import axios from "axios";
 import type { AiStoryboardStrategy } from "@/types";
-import { notifyCreditsUpdated } from "@/lib/credits-client";
+import { notifyCreditsUpdated, isInsufficientCreditsError } from "@/lib/credits-client";
+import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 
 /**
  * AI Creative Strategy panel for a storyboard detail page. Generates a full
@@ -40,6 +41,8 @@ export function StoryboardAiPanel({
   const [objective, setObjective] = useState("");
   const [platformsInput, setPlatformsInput] = useState("");
   const [brandContext, setBrandContext] = useState("");
+  const [insufficientCreditsMessage, setInsufficientCreditsMessage] =
+    useState<string | null>(null);
 
   async function handleGenerate() {
     setIsGenerating(true);
@@ -65,6 +68,7 @@ export function StoryboardAiPanel({
       );
       setStrategy(response.data.data);
       setApplied(false);
+      setInsufficientCreditsMessage(null);
       notifyCreditsUpdated();
       const credits = response.data?.credits;
       toast.success(
@@ -75,11 +79,19 @@ export function StoryboardAiPanel({
           : "AI strategy generated!"
       );
     } catch (error) {
-      const message =
-        axios.isAxiosError(error) && error.response?.data?.error
-          ? error.response.data.error
-          : "Failed to generate strategy";
-      toast.error(message);
+      if (isInsufficientCreditsError(error)) {
+        const message =
+          axios.isAxiosError(error) && error.response?.data?.error
+            ? error.response.data.error
+            : "You don't have enough credits for this.";
+        setInsufficientCreditsMessage(message);
+      } else {
+        const message =
+          axios.isAxiosError(error) && error.response?.data?.error
+            ? error.response.data.error
+            : "Failed to generate strategy";
+        toast.error(message);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -203,6 +215,12 @@ export function StoryboardAiPanel({
           />
         </div>
       </details>
+
+      {insufficientCreditsMessage && (
+        <div className="mt-4">
+          <InsufficientCreditsAlert message={insufficientCreditsMessage} />
+        </div>
+      )}
 
       {strategy ? (
         <div className="mt-6 space-y-6">

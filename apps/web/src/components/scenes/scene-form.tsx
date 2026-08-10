@@ -6,7 +6,8 @@ import Link from "next/link";
 import { Plus, Save, Sparkles, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import axios from "axios";
-import { notifyCreditsUpdated } from "@/lib/credits-client";
+import { notifyCreditsUpdated, isInsufficientCreditsError } from "@/lib/credits-client";
+import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 
 type SceneInput = {
   id: string;
@@ -33,6 +34,8 @@ export function SceneForm({
   const isEdit = Boolean(scene);
   const [isLoading, setIsLoading] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [insufficientCreditsMessage, setInsufficientCreditsMessage] =
+    useState<string | null>(null);
   const [formData, setFormData] = useState({
     orderIndex: scene?.orderIndex ?? 0,
     duration: scene?.duration ?? 5,
@@ -114,14 +117,23 @@ export function SceneForm({
         prompt: enhancedPrompt,
         negativePrompt: enhancedNegativePrompt,
       }));
+      setInsufficientCreditsMessage(null);
       notifyCreditsUpdated();
       toast.success("Prompt enhanced with AI!");
     } catch (error) {
-      const message =
-        axios.isAxiosError(error) && error.response?.data?.error
-          ? error.response.data.error
-          : "Failed to enhance prompt";
-      toast.error(message);
+      if (isInsufficientCreditsError(error)) {
+        const message =
+          axios.isAxiosError(error) && error.response?.data?.error
+            ? error.response.data.error
+            : "You don't have enough credits for this.";
+        setInsufficientCreditsMessage(message);
+      } else {
+        const message =
+          axios.isAxiosError(error) && error.response?.data?.error
+            ? error.response.data.error
+            : "Failed to enhance prompt";
+        toast.error(message);
+      }
     } finally {
       setIsEnhancing(false);
     }
@@ -208,6 +220,10 @@ export function SceneForm({
           placeholder="A cinematic drone shot over a mountain valley at sunrise..."
         />
       </div>
+
+      {insufficientCreditsMessage && (
+        <InsufficientCreditsAlert message={insufficientCreditsMessage} />
+      )}
 
       <div className="space-y-2">
         <label htmlFor="negativePrompt" className="text-sm font-medium">

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Loader2, Check, X } from "lucide-react";
 import toast from "react-hot-toast";
 import axios from "axios";
-import { notifyCreditsUpdated } from "@/lib/credits-client";
+import { notifyCreditsUpdated, isInsufficientCreditsError } from "@/lib/credits-client";
+import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 
 interface ScenePromptEnhancerProps {
   sceneId: string;
@@ -26,12 +27,15 @@ export function ScenePromptEnhancer({ sceneId }: ScenePromptEnhancerProps) {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [preview, setPreview] = useState<EnhanceResult | null>(null);
+  const [insufficientCreditsMessage, setInsufficientCreditsMessage] =
+    useState<string | null>(null);
 
   async function handleEnhance() {
     setIsEnhancing(true);
     try {
       const { data } = await axios.post("/api/v1/ai/enhance-prompt", { sceneId });
       setPreview(data.data);
+      setInsufficientCreditsMessage(null);
       notifyCreditsUpdated();
       toast.success(
         `Prompt enhanced — ${data.credits?.cost ?? 1} credit${
@@ -39,7 +43,13 @@ export function ScenePromptEnhancer({ sceneId }: ScenePromptEnhancerProps) {
         } used, ${data.credits?.remaining ?? "?"} remaining`
       );
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data?.error) {
+      if (isInsufficientCreditsError(error)) {
+        const message =
+          axios.isAxiosError(error) && error.response?.data?.error
+            ? error.response.data.error
+            : "You don't have enough credits for this.";
+        setInsufficientCreditsMessage(message);
+      } else if (axios.isAxiosError(error) && error.response?.data?.error) {
         toast.error(error.response.data.error);
       } else {
         toast.error("Failed to enhance prompt");
@@ -73,7 +83,9 @@ export function ScenePromptEnhancer({ sceneId }: ScenePromptEnhancerProps) {
 
   return (
     <div className="mt-3">
-      {preview ? (
+      {insufficientCreditsMessage ? (
+        <InsufficientCreditsAlert message={insufficientCreditsMessage} />
+      ) : preview ? (
         <div className="rounded-lg border border-vortex-500/40 bg-muted/40 p-3 text-sm">
           <p className="mb-1 flex items-center gap-1 text-xs font-medium text-vortex-600 dark:text-vortex-400">
             <Sparkles className="h-3 w-3" />
