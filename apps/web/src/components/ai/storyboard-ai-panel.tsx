@@ -26,10 +26,12 @@ export function StoryboardAiPanel({
   storyboardId,
   startIndex,
   initialStrategy,
+  id = "ai-strategy",
 }: {
   storyboardId: string;
   startIndex: number;
   initialStrategy?: AiStoryboardStrategy | null;
+  id?: string;
 }) {
   const router = useRouter();
   const [strategy, setStrategy] = useState<AiStoryboardStrategy | null>(
@@ -125,7 +127,7 @@ export function StoryboardAiPanel({
   }
 
   return (
-    <section className="rounded-xl border p-6">
+    <section id={id} className="rounded-xl border p-6 scroll-mt-24">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold">

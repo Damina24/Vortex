@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
-import { ArrowLeft, Plus, Film } from "lucide-react";
+import { ArrowLeft, Plus, Film, Wand2 } from "lucide-react";
 import { StoryboardAiPanel } from "@/components/ai/storyboard-ai-panel";
 import { ScenePromptEnhancer } from "@/components/scenes/scene-prompt-enhancer";
 import type { AiStoryboardStrategy } from "@/types";
@@ -152,17 +152,31 @@ export default async function StoryboardDetailPage({
           </div>
         ) : (
           <div className="rounded-xl border border-dashed p-10 text-center">
-            <Film className="mx-auto h-10 w-10 text-muted-foreground/50 mb-3" />
-            <p className="text-sm text-muted-foreground mb-4">
-              No scenes yet. Add your first scene to start building the story.
+            <Wand2 className="mx-auto h-10 w-10 text-muted-foreground/50 mb-3" />
+            <p className="text-sm text-muted-foreground">
+              No scenes yet. Let AI build a scene-by-scene plan from your
+              storyboard brief, or add your first scene manually.
             </p>
-            <Link
-              href={`/dashboard/storyboards/${params.id}/scenes/new`}
-              className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-4 py-2 text-sm font-medium text-white hover:bg-vortex-700 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              Add First Scene
-            </Link>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              <a
+                href="#ai-strategy"
+                className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-4 py-2 text-sm font-medium text-white hover:bg-vortex-700 transition-colors"
+              >
+                <Wand2 className="h-4 w-4" />
+                Generate Scenes with AI
+              </a>
+              <Link
+                href={`/dashboard/storyboards/${params.id}/scenes/new`}
+                className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium text-muted-foreground hover:border-vortex-500/50 hover:text-foreground transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Add Scene Manually
+              </Link>
+            </div>
+            <p className="mt-4 text-xs text-muted-foreground/70">
+              AI strategy generation costs 5 credits and includes a
+              one-click &quot;Create Scenes from Plan&quot;.
+            </p>
           </div>
         )}
       </div>
