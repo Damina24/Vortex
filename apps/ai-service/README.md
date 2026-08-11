@@ -6,13 +6,18 @@ offline `MockProvider` for development/testing.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET`  | `/health` | Liveness + which LLM provider is active |
-| `POST` | `/v1/ai/storyboard-strategy` | Generate a full creative strategy + scene plan from a storyboard brief |
-| `POST` | `/v1/ai/enhance-prompt` | Enrich a raw scene prompt into a production-ready video generation prompt |
+| Method | Path                         | Purpose                                                                   |
+| ------ | ---------------------------- | ------------------------------------------------------------------------- |
+| `GET`  | `/health`                    | Liveness + which LLM provider is active                                   |
+| `POST` | `/v1/ai/storyboard-strategy` | Generate a full creative strategy + scene plan from a storyboard brief    |
+| `POST` | `/v1/ai/enhance-prompt`      | Enrich a raw scene prompt into a production-ready video generation prompt |
 
 ## Running locally
+
+> **Requires Python 3.9 – 3.12.** The pinned `pydantic==2.7.4` (and its
+> `pydantic-core`) does not provide prebuilt wheels or build on Python 3.13+.
+> On Windows, create the venv with a compatible interpreter:
+> `py -3.12 -m venv .venv`.
 
 ```bash
 # one-time setup
