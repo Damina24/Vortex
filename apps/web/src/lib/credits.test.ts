@@ -117,6 +117,7 @@ describe("AI_CREDIT_COSTS", () => {
   it("matches the documented pricing", () => {
     expect(AI_CREDIT_COSTS.storyboardStrategy).toBe(5);
     expect(AI_CREDIT_COSTS.enhancePrompt).toBe(1);
+    expect(AI_CREDIT_COSTS.videoGeneration).toBe(10);
   });
 });
 

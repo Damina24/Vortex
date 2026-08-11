@@ -5,6 +5,7 @@
 Go to your Vercel project **Settings → Environment Variables** and add these:
 
 ### Required
+
 - `DATABASE_URL` — your Postgres connection string
 - `NEXTAUTH_URL` — your live domain, e.g. `https://vortex-ai.vercel.app`
 - `NEXTAUTH_SECRET` — a strong random secret
@@ -16,6 +17,7 @@ Go to your Vercel project **Settings → Environment Variables** and add these:
 - `NEXT_PUBLIC_GITHUB_CLIENT_ID` — from GitHub Developer Settings (client-side, used to show the GitHub sign-in button)
 
 ### Optional
+
 - `REDIS_URL`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `SUNO_API_KEY`, etc. from `.env.example`
 
 After adding env vars, **redeploy** from the Vercel dashboard.
@@ -42,6 +44,7 @@ After adding env vars, **redeploy** from the Vercel dashboard.
 ## 4) NEXTAUTH_SECRET
 
 Generate a strong random secret:
+
 - macOS/Linux: `openssl rand -base64 32`
 - Windows PowerShell: `[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))`
 
@@ -50,6 +53,7 @@ Add it as `NEXTAUTH_SECRET` in Vercel Settings → Environment Variables.
 ## 5) Prisma Migrations
 
 ### Local setup
+
 ```bash
 # Copy env
 cp .env.example .env
@@ -65,15 +69,19 @@ npx prisma migrate deploy
 ```
 
 ### If no migrations folder exists
+
 If `apps/web/prisma/migrations` is empty, create the initial migration:
+
 ```bash
 cd apps/web
 npx prisma migrate dev --name init
 ```
 
 ### Production / Vercel
+
 - Add `DATABASE_URL` in Vercel env vars pointing to your Postgres
 - Run migrations locally against the same DATABASE_URL:
+
 ```bash
 cd apps/web
 npx prisma migrate deploy
@@ -99,6 +107,7 @@ prefix) public, or serve objects through signed URLs / a CDN.
 - Visit `/login` to sign in with email/password
 - Google/GitHub buttons should appear after adding OAuth env vars
 - After login, you should redirect to `/dashboard`
+
 ## 8) AI Service (LLM-powered creative tools)
 
 The web app delegates AI work to the FastAPI microservice in `apps/ai-service`
@@ -108,10 +117,12 @@ through the web app's `/api/v1/ai/*` routes, so LLM keys never reach the browser
 ### Environment variables
 
 On Vercel (web app):
+
 - `AI_SERVICE_URL` — base URL of the running AI service, e.g.
   `https://ai-service.your-domain.com` (or `http://localhost:8000` locally).
 
 On the AI service itself:
+
 - `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` — LLM provider keys
 - `MOCK_LLM=true` — deterministic offline responses (development/testing only)
 
@@ -121,11 +132,13 @@ the AI endpoints return `503`.
 ### Deploying the service
 
 Local (with Docker):
+
 ```bash
 docker compose up --build ai-service    # listens on :8000
 ```
 
 Without Docker:
+
 ```bash
 cd apps/ai-service
 python -m venv .venv && . .venv/Scripts/Activate.ps1
@@ -140,9 +153,10 @@ on Vercel to point at it.
 ### Credit costs
 
 AI calls charge usage credits (atomic debit + a `credit_transactions` "usage"
-row): **5 credits** per storyboard strategy, **1 credit** per prompt enhancement.
-New accounts start with a 100-credit signup bonus. Users with insufficient
-credits get a `402 Payment Required` response with a clear message.
+row): **5 credits** per storyboard strategy, **1 credit** per prompt enhancement,
+**10 credits** per video render. New accounts start with a 100-credit signup
+bonus. Users with insufficient credits get a `402 Payment Required` response
+with a clear message.
 
 ## 9) Billing (credit purchases via Stripe)
 
@@ -157,9 +171,9 @@ package/ledger logic live in `apps/web/src`:
   `checkout.session.completed`, atomically:
   1. inserts a `credit_transactions` row of type `purchase` (`+N` credits),
   2. increments the user's `creditsBalance` and bumps `subscriptionTier`.
-  The transaction primary key is derived deterministically (UUID v5) from the
-  Stripe session id, so **retried deliveries are idempotent** — duplicate
-  events collide on the primary key and are skipped instead of double-crediting.
+     The transaction primary key is derived deterministically (UUID v5) from the
+     Stripe session id, so **retried deliveries are idempotent** — duplicate
+     events collide on the primary key and are skipped instead of double-crediting.
 - `GET /api/v1/billing/transactions` — last 25 ledger rows shown on the
   credits page (`/dashboard/credits`), which also shows the live balance.
 
@@ -191,7 +205,7 @@ credits were added before the webhook actually granted them.
 
 ### Stripe webhook setup
 
-1. In the Stripe Dashboard → *Webhooks*, add an endpoint pointing at
+1. In the Stripe Dashboard → _Webhooks_, add an endpoint pointing at
    `{NEXT_PUBLIC_APP_URL}/api/v1/billing/webhook`.
 2. Subscribe to the **`checkout.session.completed`** event (others can be
    safely ignored).
@@ -199,3 +213,42 @@ credits were added before the webhook actually granted them.
 
 The legacy `POST /api/v1/billing/credits` endpoint (which granted credits with
 no payment) has been removed.
+
+## 10) Video generation (mock-first pipeline)
+
+Scene renders follow the same provider-agnostic architecture as the AI service:
+a `VideoGenerationProvider` interface with a deterministic offline
+`MockVideoProvider` that ships with the app, so the **entire flow works without
+any external API keys**.
+
+### How it works
+
+- `POST /api/v1/generation-jobs` `{ sceneId }` — validates scene ownership,
+  charges **10 credits** up front, creates a `generation_jobs` row (video), and
+  drives it through `queued → processing → completed | failed`.
+- On success it persists the output file(s) to object storage
+  (`src/lib/generation/storage.ts`, MinIO/S3 with an inline-data-URI fallback),
+  creates a video `Asset`, links it to the scene's `generated_video_id`, and
+  keeps the storyboard status in sync (`generating` → `completed` once all
+  scenes are done).
+- `GET /api/v1/generation-jobs/[id]` — returns the job status, ready for
+  polling once real (asynchronous) render providers are plugged in.
+- UI: the **Scenes** page (`/dashboard/storyboards/[id]/scenes`) shows a
+  "Generate Video · 10 credits" button per scene, a rendering state, an inline
+  preview for completed renders, a retry state on failure, and the standard
+  buy-credits alert on `402`.
+
+### Config
+
+- `VIDEO_PROVIDER=mock` (default) — the only built-in provider. Set
+  `MOCK_RENDER_DELAY_MS` to tune the simulated render latency (0 for instant).
+- Real providers (Kling, Runway, WAN, Hailuo, …) implement
+  `VideoGenerationProvider` in `apps/web/src/lib/generation/providers.ts`,
+  register in `PROVIDER_REGISTRY`, and set `VIDEO_PROVIDER=<name>`. Async
+  providers return a `providerJobId`; point `GET /api/v1/generation-jobs/[id]`
+  pollers at them once in place.
+- In mock mode the "video" is an SVG poster card derived from the scene prompt
+  so the pipeline is exercisable end-to-end locally (Docker/Postgres optional —
+  the routes also tolerate S3 being down).
+- Every credit spend is a `credit_transactions` "usage" row linked to the job,
+  and `related_job_id` preserves the job → transaction link.

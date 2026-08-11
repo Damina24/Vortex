@@ -10,6 +10,8 @@ import { Prisma, TransactionType, type SubscriptionTier } from "@prisma/client";
 export const AI_CREDIT_COSTS = {
   storyboardStrategy: 5,
   enhancePrompt: 1,
+  /** Cost per video render via the generation pipeline. */
+  videoGeneration: 10,
 } as const;
 
 /** Thrown when a user does not have enough credits for an operation. */
@@ -19,7 +21,7 @@ export class InsufficientCreditsError extends Error {
 
   constructor(balance: number, required: number) {
     super(
-      `Insufficient credits. This costs ${required} credit(s) but you only have ${balance}.`
+      `Insufficient credits. This costs ${required} credit(s) but you only have ${balance}.`,
     );
     this.name = "InsufficientCreditsError";
     this.balance = balance;
@@ -103,7 +105,7 @@ function uuidv5(name: string, namespace: string = CREDIT_TX_NAMESPACE): string {
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
     16,
-    20
+    20,
   )}-${hex.slice(20, 32)}`;
 }
 

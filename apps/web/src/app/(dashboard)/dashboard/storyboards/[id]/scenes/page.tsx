@@ -2,8 +2,10 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
+import { AI_CREDIT_COSTS } from "@/lib/credits";
 import { SceneActions } from "@/components/scenes/scene-actions";
 import { ScenePromptEnhancer } from "@/components/scenes/scene-prompt-enhancer";
+import { SceneVideoGenerator } from "@/components/scenes/scene-video-generator";
 import Link from "next/link";
 import { ArrowLeft, Plus, Film } from "lucide-react";
 
@@ -31,6 +33,18 @@ export default async function StoryboardScenesPage({
       },
       scenes: {
         orderBy: { orderIndex: "asc" },
+        include: {
+          generatedVideo: {
+            // Keep only RSC-serializable fields — `sizeBytes` is a BigInt.
+            select: {
+              id: true,
+              url: true,
+              thumbnailUrl: true,
+              name: true,
+              mimeType: true,
+            },
+          },
+        },
       },
     },
   });
@@ -85,6 +99,12 @@ export default async function StoryboardScenesPage({
                 </div>
               </div>
               <ScenePromptEnhancer sceneId={scene.id} />
+              <SceneVideoGenerator
+                sceneId={scene.id}
+                status={scene.status}
+                generatedVideo={scene.generatedVideo}
+                creditCost={AI_CREDIT_COSTS.videoGeneration}
+              />
 
               <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-3">
@@ -101,7 +121,8 @@ export default async function StoryboardScenesPage({
           <Film className="mx-auto h-16 w-16 text-muted-foreground/30 mb-4" />
           <h3 className="text-xl font-semibold mb-2">No scenes yet</h3>
           <p className="text-sm text-muted-foreground mb-8 max-w-md mx-auto">
-            Add your first scene to start defining the story flow and video prompts.
+            Add your first scene to start defining the story flow and video
+            prompts.
           </p>
           <Link
             href={`/dashboard/storyboards/${params.id}/scenes/new`}
