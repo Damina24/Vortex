@@ -1,7 +1,11 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { CREDIT_PACKAGES } from "@/lib/billing/packages";
+import {
+  CREDIT_PACKAGES,
+  isCreditPackageId,
+  type CreditPackageId,
+} from "@/lib/billing/packages";
 import { addPurchaseCredits } from "@/lib/credits";
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -36,7 +40,7 @@ export async function POST(req: Request) {
     event = stripe.webhooks.constructEvent(
       body,
       signature,
-      process.env.STRIPE_WEBHOOK_SECRET
+      process.env.STRIPE_WEBHOOK_SECRET,
     );
   } catch (error) {
     console.error("Webhook signature verification failed:", error);
@@ -46,15 +50,16 @@ export async function POST(req: Request) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const userId = session.metadata?.userId;
-    const packageId = (
-      session.metadata?.packageId ?? "starter"
-    ) as keyof typeof CREDIT_PACKAGES;
-    const pkg = CREDIT_PACKAGES[packageId] ?? CREDIT_PACKAGES.starter;
+    const rawPackageId = session.metadata?.packageId ?? "starter";
+    const packageId: CreditPackageId = isCreditPackageId(rawPackageId)
+      ? rawPackageId
+      : "starter";
+    const pkg = CREDIT_PACKAGES[packageId];
     const credits = Number(session.metadata?.credits || pkg.credits);
 
     if (!userId) {
       console.error(
-        `Webhook: checkout.session.completed for session ${session.id} had no userId — skipping.`
+        `Webhook: checkout.session.completed for session ${session.id} had no userId — skipping.`,
       );
     } else {
       const balance = await addPurchaseCredits({
@@ -67,11 +72,11 @@ export async function POST(req: Request) {
 
       if (balance === null) {
         console.log(
-          `Webhook: purchase for session ${session.id} already processed — skipping (idempotent).`
+          `Webhook: purchase for session ${session.id} already processed — skipping (idempotent).`,
         );
       } else {
         console.log(
-          `Webhook: credited ${credits} credits to user ${userId}; new balance ${balance}.`
+          `Webhook: credited ${credits} credits to user ${userId}; new balance ${balance}.`,
         );
       }
     }

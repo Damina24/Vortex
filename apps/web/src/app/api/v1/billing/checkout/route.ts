@@ -3,11 +3,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth-options";
 import { z } from "zod";
 import Stripe from "stripe";
-import { CREDIT_PACKAGES } from "@/lib/billing/packages";
+import { CREDIT_PACKAGES, CREDIT_PACKAGE_IDS } from "@/lib/billing/packages";
 import { addPurchaseCredits } from "@/lib/credits";
 
 const checkoutSchema = z.object({
-  packageId: z.enum(["starter", "pro", "business"]),
+  packageId: z.enum(CREDIT_PACKAGE_IDS),
 });
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     if (!session?.user) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -42,14 +42,13 @@ export async function POST(req: Request) {
     if (!validation.success) {
       return NextResponse.json(
         { success: false, error: "Please select a valid package" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const packageId = validation.data.packageId;
     const pkg = CREDIT_PACKAGES[packageId];
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
     if (!stripe) {
       // Demo mode: grant instantly, mirroring what the webhook would do.
@@ -118,7 +117,7 @@ export async function POST(req: Request) {
       },
       {
         status: 500,
-      }
+      },
     );
   }
 }

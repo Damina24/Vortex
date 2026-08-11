@@ -15,6 +15,8 @@ export interface CreditPackage {
   /** Subscription tier bumped to when this package is purchased. */
   tier: SubscriptionTier;
   description: string;
+  /** Whether to visually highlight this package as "most popular". */
+  highlight?: boolean;
 }
 
 /**
@@ -40,6 +42,7 @@ export const CREDIT_PACKAGES: Record<CreditPackageId, CreditPackage> = {
     unitAmount: 4900,
     tier: "creator",
     description: "Best for regular content creation",
+    highlight: true,
   },
   business: {
     id: "business",
@@ -51,6 +54,10 @@ export const CREDIT_PACKAGES: Record<CreditPackageId, CreditPackage> = {
     description: "For agencies and high-volume launches",
   },
 } as const;
+
+/** Ordered array view of all credit packages (useful for iteration in UI). */
+export const CREDIT_PACKAGE_LIST: CreditPackage[] =
+  Object.values(CREDIT_PACKAGES);
 
 export function isCreditPackageId(value: string): value is CreditPackageId {
   return (CREDIT_PACKAGE_IDS as readonly string[]).includes(value);

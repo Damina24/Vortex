@@ -14,33 +14,11 @@ import {
 import axios from "axios";
 import toast from "react-hot-toast";
 import { notifyCreditsUpdated, useLiveCredits } from "@/lib/credits-client";
-
-const packages = [
-  {
-    id: "starter",
-    name: "Starter",
-    credits: 250,
-    price: 19,
-    description: "Perfect for your first campaign",
-    highlight: false,
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    credits: 1000,
-    price: 49,
-    description: "Best for regular content creation",
-    highlight: true,
-  },
-  {
-    id: "business",
-    name: "Business",
-    credits: 5000,
-    price: 149,
-    description: "For agencies and higher-volume launches",
-    highlight: false,
-  },
-] as const;
+import {
+  CREDIT_PACKAGES,
+  CREDIT_PACKAGE_LIST,
+  type CreditPackageId,
+} from "@/lib/billing/packages";
 
 interface CreditTransaction {
   id: string;
@@ -64,9 +42,8 @@ export default function CreditsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { balance } = useLiveCredits(0);
-
   const [selectedPackage, setSelectedPackage] =
-    useState<(typeof packages)[number]["id"]>("pro");
+    useState<CreditPackageId>("pro");
   const [isLoading, setIsLoading] = useState(false);
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
@@ -132,7 +109,7 @@ export default function CreditsPage() {
         (tx) =>
           tx.transactionType === "purchase" &&
           new Date(tx.createdAt).getTime() >=
-            pageLoadStartedAt.current - 60_000
+            pageLoadStartedAt.current - 60_000,
       );
 
       if (confirmed) {
@@ -184,7 +161,7 @@ export default function CreditsPage() {
         await loadTransactions();
         notifyCreditsUpdated();
         toast.success(
-          `Demo purchase complete — ${data.credits.toLocaleString()} credits added.`
+          `Demo purchase complete — ${data.credits.toLocaleString()} credits added.`,
         );
         return;
       }
@@ -207,10 +184,15 @@ export default function CreditsPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-8">
       <div className="space-y-2">
-        <p className="text-sm font-medium uppercase tracking-[0.2em] text-vortex-600">Monetization</p>
-        <h1 className="text-3xl font-bold tracking-tight">Buy credits to keep creating</h1>
+        <p className="text-sm font-medium uppercase tracking-[0.2em] text-vortex-600">
+          Monetization
+        </p>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Buy credits to keep creating
+        </h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Keep your campaigns moving by purchasing credits for storyboards, creative direction, and fast iteration when you need more output.
+          Keep your campaigns moving by purchasing credits for storyboards,
+          creative direction, and fast iteration when you need more output.
         </p>
       </div>
 
@@ -234,7 +216,7 @@ export default function CreditsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {packages.map((pkg) => (
+        {CREDIT_PACKAGE_LIST.map((pkg) => (
           <button
             key={pkg.id}
             type="button"
@@ -254,7 +236,9 @@ export default function CreditsPage() {
               <Sparkles className="h-5 w-5 text-vortex-500" />
               <h2 className="text-xl font-semibold">{pkg.name}</h2>
             </div>
-            <p className="mt-3 text-sm text-muted-foreground">{pkg.description}</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {pkg.description}
+            </p>
             <div className="mt-6 flex items-baseline gap-2">
               <span className="text-4xl font-bold">${pkg.price}</span>
               <span className="text-sm text-muted-foreground">one-time</span>
@@ -272,9 +256,12 @@ export default function CreditsPage() {
       <div className="rounded-2xl border bg-background p-6 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-medium text-muted-foreground">Selected package</p>
+            <p className="text-sm font-medium text-muted-foreground">
+              Selected package
+            </p>
             <p className="text-lg font-semibold">
-              {packages.find((pkg) => pkg.id === selectedPackage)?.name} — {packages.find((pkg) => pkg.id === selectedPackage)?.credits} credits
+              {CREDIT_PACKAGES[selectedPackage]?.name} —{" "}
+              {CREDIT_PACKAGES[selectedPackage]?.credits} credits
             </p>
           </div>
           <button
