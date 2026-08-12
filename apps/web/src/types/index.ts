@@ -260,6 +260,13 @@ export interface GenerationJobResponse {
   errorMessage?: string;
 }
 
+/**
+ * Audio generation is a distinct job type but reuses the same persisted
+ * `GenerationJob` row and response shape as video; this alias keeps the audio
+ * API typed without duplicating the mapping logic.
+ */
+export type AudioJobResponse = GenerationJobResponse;
+
 // ============================================================
 // Analytics Types
 // ============================================================

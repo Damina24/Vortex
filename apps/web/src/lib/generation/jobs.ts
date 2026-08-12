@@ -22,7 +22,7 @@ function truncate(value: string, max = 48): string {
   return cleaned.length > max ? `${cleaned.slice(0, max).trimEnd()}…` : cleaned;
 }
 
-type GenerationJobWithStatus = {
+export type GenerationJobWithStatus = {
   id: string;
   status: string;
   creditsConsumed: number;

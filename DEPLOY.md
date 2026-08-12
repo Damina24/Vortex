@@ -152,11 +152,12 @@ on Vercel to point at it.
 
 ### Credit costs
 
-AI calls charge usage credits (atomic debit + a `credit_transactions` "usage"
-row): **5 credits** per storyboard strategy, **1 credit** per prompt enhancement,
-**10 credits** per video render. New accounts start with a 100-credit signup
-bonus. Users with insufficient credits get a `402 Payment Required` response
-with a clear message.
+AI call usage credits (atomic debit + a `credit_transactions` "usage" row):
+**5 credits** per storyboard strategy, **1 credit** per prompt enhancement,
+**10 credits** per video render, **5 credits** per voiceover, **8 credits**
+per background music track. New accounts start with a 100-credit signup bonus.
+Users with insufficient credits get a `402 Payment Required` response with a
+clear message.
 
 ## 9) Billing (credit purchases via Stripe)
 
@@ -252,3 +253,20 @@ any external API keys**.
   the routes also tolerate S3 being down).
 - Every credit spend is a `credit_transactions` "usage" row linked to the job,
   and `related_job_id` preserves the job → transaction link.
+
+### Audio generation (voiceover / music)
+
+Audio uses the **exact same** `generation_jobs` + `credit_transactions` + `Asset`
+machinery as video — it just selects a different `JobType` (`voice` or `music`)
+and creates an `audio` `Asset` (populating `duration`, leaving `width`/`height`
+null). No schema changes are required.
+
+- `POST /api/v1/audio-jobs` `{ projectId, kind: "voiceover"|"music", prompt, duration }` — charges **5** or **8** credits, creates a job of type `voice`/`music`, runs it
+  through `queued → processing → completed | failed`, persists the rendered
+  file(s) to storage, and creates an `audio` `Asset` under the project.
+- `GET /api/v1/audio-jobs/[id]` — poll-ready status (mock completes synchronously).
+- Config: `AUDIO_PROVIDER=mock` (default; simulate latency with
+  `MOCK_AUDIO_DELAY_MS`). Real providers implement `AudioGenerationProvider` in
+  `src/lib/generation/audio-providers.ts` and register in `AUDIO_PROVIDER_REGISTRY`.
+- The mock provider emits a valid silent PCM WAV; it is deterministic per prompt
+  (same prompt + duration ⇒ identical bytes and `providerJobId`).

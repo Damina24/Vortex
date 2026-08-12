@@ -12,6 +12,10 @@ export const AI_CREDIT_COSTS = {
   enhancePrompt: 1,
   /** Cost per video render via the generation pipeline. */
   videoGeneration: 10,
+  /** Cost per voiceover generation via the generation pipeline. */
+  voiceover: 5,
+  /** Cost per background music track generated via the pipeline. */
+  music: 8,
 } as const;
 
 /** Thrown when a user does not have enough credits for an operation. */
