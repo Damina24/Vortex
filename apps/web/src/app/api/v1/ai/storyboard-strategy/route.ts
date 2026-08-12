@@ -11,6 +11,7 @@ import {
   spendCredits,
 } from "@/lib/credits";
 import type { AiStoryboardStrategyRequest } from "@/types";
+import { composeBrandContext } from "@/lib/brand-dna";
 import { z } from "zod";
 
 const generateStrategySchema = z.object({
@@ -57,7 +58,11 @@ export async function POST(req: Request) {
         },
       },
       include: {
-        project: true,
+        project: {
+          include: {
+            brandDna: true,
+          },
+        },
         scenes: {
           orderBy: { orderIndex: "asc" },
         },
@@ -71,6 +76,23 @@ export async function POST(req: Request) {
       );
     }
 
+    const brandedProject = storyboard.project as (typeof storyboard.project) & {
+      brandDna?: {
+        id: string;
+        name: string;
+        visualIdentity: unknown;
+        voiceTone: unknown;
+        complianceRules: unknown;
+      } | null;
+    };
+
+    // Prefer the project's assigned brand profile for the AI brief. When the
+    // user typed a manual brand context, append it so both are honored.
+    const resolvedBrandContext = composeBrandContext(
+      brandedProject.brandDna,
+      brandContext
+    );
+
     const aiRequest: AiStoryboardStrategyRequest = {
       storyboardName: storyboard.name,
       projectName: storyboard.project.name,
@@ -80,7 +102,7 @@ export async function POST(req: Request) {
         targetPlatforms ??
         (storyboard.project.targetPlatforms as string[]) ??
         [],
-      brandContext: brandContext ?? null,
+      brandContext: resolvedBrandContext,
       scenes: storyboard.scenes.map((scene) => ({
         orderIndex: scene.orderIndex,
         prompt: scene.prompt,

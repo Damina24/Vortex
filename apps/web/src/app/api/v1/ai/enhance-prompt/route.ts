@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
 import { AiServiceError, enhanceScenePrompt } from "@/lib/ai/client";
+import { composeBrandContext } from "@/lib/brand-dna";
 import {
   AI_CREDIT_COSTS,
   InsufficientCreditsError,
@@ -50,7 +51,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { sceneId, prompt, negativePrompt, aspectRatio, brandContext } =
+    let { sceneId, prompt, negativePrompt, aspectRatio, brandContext } =
       validation.data;
 
     let promptToEnhance: string | null | undefined = prompt;
@@ -67,6 +68,17 @@ export async function POST(req: Request) {
             },
           },
         },
+        include: {
+          storyboard: {
+            include: {
+              project: {
+                include: {
+                  brandDna: true,
+                },
+              },
+            },
+          },
+        },
       });
 
       if (!scene) {
@@ -79,6 +91,26 @@ export async function POST(req: Request) {
       promptToEnhance = scene.prompt;
       negativeToEnhance = scene.negativePrompt;
       aspectToEnhance = aspectRatio ?? scene.aspectRatio;
+
+      // Auto-inject the project's assigned brand profile so prompt
+      // enhancement stays on-brand without manual entry.
+      const project = scene.storyboard.project;
+      const projectWithBrand = project as typeof project & {
+        brandDna?: {
+          id: string;
+          name: string;
+          visualIdentity: unknown;
+          voiceTone: unknown;
+          complianceRules: unknown;
+        } | null;
+      };
+      const resolvedBrandContext = composeBrandContext(
+        projectWithBrand.brandDna,
+        brandContext
+      );
+      if (resolvedBrandContext) {
+        brandContext = resolvedBrandContext;
+      }
     }
 
     if (!promptToEnhance?.trim()) {
