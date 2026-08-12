@@ -14,7 +14,11 @@ import {
 import toast from "react-hot-toast";
 import axios from "axios";
 import type { AiStoryboardStrategy } from "@/types";
-import { notifyCreditsUpdated, isInsufficientCreditsError } from "@/lib/credits-client";
+import {
+  notifyCreditsUpdated,
+  isInsufficientCreditsError,
+  useLiveCredits,
+} from "@/lib/credits-client";
 import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 
 /**
@@ -45,6 +49,11 @@ export function StoryboardAiPanel({
   const [brandContext, setBrandContext] = useState("");
   const [insufficientCreditsMessage, setInsufficientCreditsMessage] =
     useState<string | null>(null);
+  const { balance, loaded } = useLiveCredits(0);
+  // Proactively surface a buy-credits CTA when the user has no budget, instead
+  // of only showing it after a failed (402) generation attempt. `loaded` guards
+  // against flashing "out of credits" while the balance is still being fetched.
+  const isOutOfCredits = loaded && balance <= 0;
 
   async function handleGenerate() {
     setIsGenerating(true);
@@ -143,7 +152,7 @@ export function StoryboardAiPanel({
         <button
           type="button"
           onClick={handleGenerate}
-          disabled={isGenerating}
+          disabled={isGenerating || isOutOfCredits}
           className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-4 py-2 text-sm font-medium text-white hover:bg-vortex-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isGenerating ? (
@@ -221,6 +230,12 @@ export function StoryboardAiPanel({
       {insufficientCreditsMessage && (
         <div className="mt-4">
           <InsufficientCreditsAlert message={insufficientCreditsMessage} />
+        </div>
+      )}
+
+      {isOutOfCredits && (
+        <div className="mt-4">
+          <InsufficientCreditsAlert message="You need at least 5 credits to generate an AI strategy. Top up and come back to continue." />
         </div>
       )}
 

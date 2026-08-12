@@ -42,6 +42,7 @@ async function fetchLiveCreditsBalance(): Promise<number | null> {
 export function useLiveCredits(initialBalance: number) {
   const [balance, setBalance] = useState(initialBalance);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const isMounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -51,6 +52,9 @@ export function useLiveCredits(initialBalance: number) {
       if (fresh !== null) {
         setBalance(fresh);
       }
+      // The initial fetch has resolved; consumers can safely rely on `balance`
+      // being the live value rather than the server-provided placeholder.
+      setLoaded(true);
       setIsRefreshing(false);
     }
   }, []);
@@ -67,5 +71,5 @@ export function useLiveCredits(initialBalance: number) {
     };
   }, [refresh]);
 
-  return { balance, isRefreshing, refresh };
+  return { balance, isRefreshing, loaded, refresh };
 }
