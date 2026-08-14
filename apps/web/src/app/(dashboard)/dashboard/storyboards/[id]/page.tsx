@@ -28,7 +28,11 @@ export default async function StoryboardDetailPage({
     },
     include: {
       project: {
-        select: { id: true, name: true },
+        select: {
+          id: true,
+          name: true,
+          brandDna: { select: { id: true, name: true } },
+        },
       },
       scenes: {
         orderBy: { orderIndex: "asc" },
@@ -115,6 +119,8 @@ export default async function StoryboardDetailPage({
           ) + 1
         }
         initialStrategy={storyboard.aiStrategy as AiStoryboardStrategy | null}
+        brandProfile={storyboard.project.brandDna}
+        projectId={storyboard.project.id}
       />
 
       {/* Scenes */}

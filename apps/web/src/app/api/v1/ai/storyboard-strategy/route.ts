@@ -147,6 +147,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       data: strategy,
+      brandProfile: brandedProject.brandDna
+        ? { id: brandedProject.brandDna.id, name: brandedProject.brandDna.name }
+        : null,
       credits: { cost, remaining },
     });
   } catch (error) {

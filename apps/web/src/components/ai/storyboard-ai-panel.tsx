@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Sparkles,
   Wand2,
@@ -10,6 +11,7 @@ import {
   Target,
   Megaphone,
   MonitorSmartphone,
+  Palette,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import axios from "axios";
@@ -30,17 +32,25 @@ export function StoryboardAiPanel({
   storyboardId,
   startIndex,
   initialStrategy,
+  brandProfile,
+  projectId,
   id = "ai-strategy",
 }: {
   storyboardId: string;
   startIndex: number;
   initialStrategy?: AiStoryboardStrategy | null;
+  brandProfile?: { id: string; name: string } | null;
+  projectId?: string;
   id?: string;
 }) {
   const router = useRouter();
   const [strategy, setStrategy] = useState<AiStoryboardStrategy | null>(
     initialStrategy ?? null
   );
+  const [activeBrandProfile, setActiveBrandProfile] = useState<{
+    id: string;
+    name: string;
+  } | null>(brandProfile ?? null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [applied, setApplied] = useState(false);
@@ -78,6 +88,7 @@ export function StoryboardAiPanel({
         payload
       );
       setStrategy(response.data.data);
+      setActiveBrandProfile(response.data?.brandProfile ?? null);
       setApplied(false);
       setInsufficientCreditsMessage(null);
       notifyCreditsUpdated();
@@ -166,6 +177,47 @@ export function StoryboardAiPanel({
               ? "Regenerate Strategy"
               : "Generate Strategy"}
         </button>
+      </div>
+
+      {/* Brand profile indicator — shows what is (or isn't) feeding the AI */}
+      <div
+        className={`mt-4 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+          activeBrandProfile
+            ? "border-vortex-500/40 bg-vortex-50 dark:bg-vortex-950/50"
+            : "border-dashed text-muted-foreground"
+        }`}
+      >
+        <Palette className="h-4 w-4 text-vortex-500" />
+        {activeBrandProfile ? (
+          <>
+            <span className="font-medium text-foreground">
+              Brand profile: {activeBrandProfile.name}
+            </span>
+            <span className="text-muted-foreground">
+              applied automatically to this strategy and scene prompts.
+            </span>
+            {projectId && (
+              <Link
+                href={`/dashboard/projects/${projectId}/settings`}
+                className="ml-auto text-xs font-medium text-vortex-600 hover:text-vortex-500"
+              >
+                Change
+              </Link>
+            )}
+          </>
+        ) : (
+          <span>
+            No brand profile assigned — the AI will use default guidelines.
+            {projectId && (
+              <Link
+                href={`/dashboard/projects/${projectId}/settings`}
+                className="ml-1 font-medium text-vortex-600 hover:text-vortex-500"
+              >
+                Assign one
+              </Link>
+            )}
+          </span>
+        )}
       </div>
 
       <details className="mt-4 text-sm">
