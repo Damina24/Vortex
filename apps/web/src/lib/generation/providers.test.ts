@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  MockAsyncVideoProvider,
   MockVideoProvider,
   VideoProviderUnavailableError,
   buildPosterSvg,
   escapeXml,
   getVideoProvider,
+  isAsyncVideoProvider,
   normalizePosterText,
 } from "./providers";
 
@@ -141,5 +143,75 @@ describe("SVG poster helpers", () => {
     expect(svg).toContain("16:9 · 8s");
     expect(svg).toContain('width="1000" height="700"');
     expect(svg).toContain("MOCK RENDER");
+  });
+});
+
+describe("Async video providers", () => {
+  const params = {
+    prompt: "A fox in the snow",
+    aspectRatio: "16:9",
+    duration: 5,
+  };
+
+  it("classifies providers by capability", async () => {
+    expect(isAsyncVideoProvider(new MockAsyncVideoProvider())).toBe(true);
+    expect(isAsyncVideoProvider(new MockVideoProvider())).toBe(false);
+  });
+
+  it("reports processing until the latency elapses, then succeeded", async () => {
+    let now = 1_000;
+    const provider = new MockAsyncVideoProvider({
+      latencyMs: 100,
+      now: () => now,
+    });
+
+    const submitted = await provider.submit(params);
+    expect(submitted.providerJobId).toMatch(/^mock_async_/);
+
+    const early = await provider.retrieve(submitted.providerJobId, params);
+    expect(early.status).toBe("processing");
+
+    now = 1_150; // 150ms > 100ms latency
+    const done = await provider.retrieve(submitted.providerJobId, params);
+    expect(done.status).toBe("succeeded");
+    if (done.status === "succeeded") {
+      expect(done.result.provider).toBe("mock-async");
+      expect(done.result.duration).toBe(5);
+      expect(done.result.files[0]?.contentType).toBe("image/svg+xml");
+    }
+  });
+
+  it("is stateless and resumable across distinct provider instances", async () => {
+    const submitter = new MockAsyncVideoProvider({
+      latencyMs: 50,
+      now: () => 1_000,
+    });
+    const submitted = await submitter.submit(params);
+
+    // A "different request" re-reads the same job id with a later clock.
+    const poller = new MockAsyncVideoProvider({
+      latencyMs: 50,
+      now: () => 1_100,
+    });
+    const done = await poller.retrieve(submitted.providerJobId, params);
+    expect(done.status).toBe("succeeded");
+  });
+
+  it("resolves mock-async through the registry and reports progress 0..1", async () => {
+    let now = 1_000;
+    const provider = new MockAsyncVideoProvider({
+      latencyMs: 100,
+      now: () => now,
+    });
+    const submitted = await provider.submit(params);
+
+    now = 1_050; // half-way
+    const mid = await provider.retrieve(submitted.providerJobId, params);
+    if (mid.status === "processing") {
+      expect(mid.progress).toBeGreaterThan(0.4);
+      expect(mid.progress).toBeLessThanOrEqual(1);
+    }
+    expect(getVideoProvider("mock-async").name).toBe("mock-async");
+    expect(isAsyncVideoProvider(getVideoProvider("mock-async"))).toBe(true);
   });
 });

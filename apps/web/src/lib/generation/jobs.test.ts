@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SceneNotFoundError,
+  completeVideoGenerationJob,
   createVideoGenerationJob,
   getVideoJobForUser,
   toJobResponse,
 } from "./jobs";
 import {
   VideoProviderUnavailableError,
+  type AsyncVideoGenerationProvider,
   type VideoGenerationProvider,
 } from "./providers";
 import { InsufficientCreditsError } from "@/lib/credits";
@@ -320,5 +322,124 @@ describe("toJobResponse", () => {
       outputAssets: [{ id: "asset-9" }],
       errorMessage: undefined,
     });
+  });
+});
+
+describe("Async (two-phase) video jobs", () => {
+  const asyncResult = {
+    provider: "mock-async",
+    providerJobId: "external-123",
+    width: 1920,
+    height: 1080,
+    duration: 4,
+    files: [
+      {
+        filename: "clip.svg",
+        contentType: "image/svg+xml",
+        body: Buffer.from("<svg/>"),
+      },
+    ],
+    metadata: { mock: true },
+  };
+
+  const asyncProvider: AsyncVideoGenerationProvider = {
+    name: "mock-async",
+    generate: vi.fn(async () => {
+      throw new Error("async providers do not implement generate");
+    }),
+    submit: vi.fn(async () => ({ providerJobId: "external-123" })),
+    retrieve: vi.fn(async () => ({
+      status: "succeeded" as const,
+      result: asyncResult,
+    })),
+  };
+
+  it("submits an async job and returns it processing instead of completing", async () => {
+    db.generationJob.findUniqueOrThrow.mockResolvedValueOnce({
+      id: "job-1",
+      providerJobId: "external-123",
+      status: "processing",
+      creditsConsumed: 10,
+      outputAssets: [],
+      errorMessage: null,
+    } as never);
+
+    const result = await createVideoGenerationJob({
+      ...opts,
+      provider: asyncProvider,
+    });
+
+    expect(asyncProvider.submit).toHaveBeenCalledTimes(1);
+    expect(db.generationJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ providerJobId: "external-123" }),
+      }),
+    );
+    // The synchronous finalize path must not run for async providers.
+    expect(db.asset.create).not.toHaveBeenCalled();
+    expect(result.job.status).toBe("processing");
+  });
+
+  it("advances a processing async job to completed on poll", async () => {
+    vi.stubEnv("MOCK_ASYNC_LATENCY_MS", "0");
+    db.generationJob.findFirst.mockResolvedValueOnce({
+      id: "job-1",
+      provider: "mock-async",
+      providerJobId: "mock_async_abc_1000",
+      sceneId: "scene-1",
+      status: "processing",
+      creditsConsumed: 10,
+      outputAssets: [],
+      errorMessage: null,
+    } as never);
+
+    const result = await completeVideoGenerationJob({
+      jobId: "job-1",
+      userId: "user-1",
+    });
+
+    expect(result.status).toBe("completed");
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ teamId: "team-1", type: "video" }),
+      }),
+    );
+    expect(db.scene.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "completed",
+          generatedVideoId: "asset-1",
+        }),
+      }),
+    );
+  });
+
+  it("leaves a sync-provider processing job unchanged", async () => {
+    db.generationJob.findFirst.mockResolvedValueOnce({
+      id: "job-1",
+      provider: "mock",
+      providerJobId: "x",
+      sceneId: "scene-1",
+      status: "processing",
+      creditsConsumed: 10,
+      outputAssets: [],
+      errorMessage: null,
+    } as never);
+
+    const result = await completeVideoGenerationJob({
+      jobId: "job-1",
+      userId: "user-1",
+    });
+
+    expect(result.status).toBe("processing");
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("throws when the job is missing or not owned", async () => {
+    db.generationJob.findFirst.mockResolvedValueOnce(null as never);
+
+    await expect(
+      completeVideoGenerationJob({ jobId: "missing", userId: "user-1" }),
+    ).rejects.toBeTruthy();
   });
 });

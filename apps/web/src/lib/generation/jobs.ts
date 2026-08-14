@@ -4,6 +4,8 @@ import { AI_CREDIT_COSTS, spendCredits } from "@/lib/credits";
 import type { GenerationJobResponse } from "@/types";
 import {
   getVideoProvider,
+  isAsyncVideoProvider,
+  type GenerationResult,
   type VideoGenerationProvider,
   type VideoGenerationParams,
 } from "./providers";
@@ -184,6 +186,35 @@ export async function createVideoGenerationJob(opts: {
     projectName: scene.storyboard.project.name,
   };
 
+  // Async (two-phase) providers submit a job and return immediately; the
+  // client polls `GET /generation-jobs/[id]`, which advances the job through
+  // `completeVideoGenerationJob` until the provider reports it is done.
+  if (isAsyncVideoProvider(provider)) {
+    try {
+      const submitted = await provider.submit(params);
+      await prisma.generationJob.update({
+        where: { id: job.id },
+        data: { providerJobId: submitted.providerJobId },
+      });
+      const queued = await prisma.generationJob.findUniqueOrThrow({
+        where: { id: job.id },
+      });
+      return {
+        job: toJobResponse(queued),
+        creditsConsumed: cost,
+        remainingBalance,
+      };
+    } catch (error) {
+      await markJobFailed({
+        jobId: job.id,
+        sceneId: scene.id,
+        storyboardId: scene.storyboardId,
+        error,
+      });
+      throw error;
+    }
+  }
+
   let result: Awaited<ReturnType<VideoGenerationProvider["generate"]>>;
   try {
     result = await provider.generate(params);
@@ -270,4 +301,212 @@ export async function createVideoGenerationJob(opts: {
     creditsConsumed: cost,
     remainingBalance,
   };
+}
+
+/** Thrown when a generation job is missing or not owned by the caller. */
+export class GenerationJobNotFoundError extends Error {
+  constructor() {
+    super("Generation job not found");
+    this.name = "GenerationJobNotFoundError";
+  }
+}
+
+interface VideoSceneContext {
+  id: string;
+  orderIndex: number;
+  storyboardId: string;
+  projectId: string;
+  teamId: string;
+  prompt: string;
+  negativePrompt: string | null;
+  aspectRatio: string;
+  duration: number;
+  projectName: string | null;
+}
+
+/** Persists a finished render: store files, create the asset, mark complete. */
+async function finalizeVideoResult(opts: {
+  jobId: string;
+  providerName: string;
+  providerJobId: string;
+  result: GenerationResult;
+  scene: VideoSceneContext;
+  userId: string;
+}): Promise<void> {
+  const stored = await storeGeneratedFiles({
+    files: opts.result.files,
+    teamId: opts.scene.teamId,
+  });
+  const primary = stored[0];
+  const asset = await prisma.asset.create({
+    data: {
+      teamId: opts.scene.teamId,
+      projectId: opts.scene.projectId,
+      name: `Scene ${opts.scene.orderIndex + 1} render`,
+      type: "video",
+      mimeType: primary?.mimeType ?? null,
+      sizeBytes: primary?.sizeBytes ?? null,
+      url: primary?.url ?? "",
+      duration: opts.result.duration,
+      width: opts.result.width,
+      height: opts.result.height,
+      createdBy: opts.userId,
+      metadata: {
+        provider: opts.providerName,
+        ...opts.result.metadata,
+      } as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  const outputAssets: GenerationJobResponse["outputAssets"] = stored.map(
+    (ref) => ({
+      id: asset.id,
+      url: ref.url,
+      type: "video",
+      name: asset.name,
+      mimeType: ref.mimeType,
+    }),
+  );
+
+  await prisma.generationJob.update({
+    where: { id: opts.jobId },
+    data: {
+      providerJobId: opts.providerJobId,
+      status: "completed",
+      outputAssets: outputAssets as unknown as Prisma.InputJsonValue,
+      completedAt: new Date(),
+    },
+  });
+
+  await prisma.scene.update({
+    where: { id: opts.scene.id },
+    data: { status: "completed", generatedVideoId: asset.id },
+  });
+
+  const incompleteScenes = await prisma.scene.count({
+    where: {
+      storyboardId: opts.scene.storyboardId,
+      status: { not: "completed" },
+    },
+  });
+
+  await prisma.storyboard.update({
+    where: { id: opts.scene.storyboardId },
+    data: { status: incompleteScenes === 0 ? "completed" : "generating" },
+  });
+}
+
+/**
+ * Advances an async (two-phase) video job one step: asks the provider whether
+ * the render is done and, if so, finalizes it exactly like the synchronous
+ * path (persist files, create the asset, mark the job completed, sync scene +
+ * storyboard). Processing/terminal/sync-provider jobs are returned unchanged.
+ * The polling GET route calls this, so async jobs progress to completion as a
+ * client polls.
+ */
+export async function completeVideoGenerationJob(opts: {
+  jobId: string;
+  userId: string;
+}): Promise<{ status: string; job: GenerationJobResponse }> {
+  const job = await prisma.generationJob.findFirst({
+    where: { id: opts.jobId, project: { createdBy: opts.userId } },
+  });
+  if (!job) {
+    throw new GenerationJobNotFoundError();
+  }
+
+  // Nothing to advance unless the job is queued/running via an async provider.
+  if (job.status !== "processing" || !job.providerJobId) {
+    return { status: job.status, job: toJobResponse(job) };
+  }
+
+  const provider = getVideoProvider(job.provider);
+  if (!isAsyncVideoProvider(provider)) {
+    return { status: job.status, job: toJobResponse(job) };
+  }
+
+  let scene: VideoSceneContext | null = null;
+  if (job.sceneId) {
+    const found = await prisma.scene.findFirst({
+      where: { id: job.sceneId },
+      include: { storyboard: { include: { project: true } } },
+    });
+    if (found) {
+      scene = {
+        id: found.id,
+        orderIndex: found.orderIndex,
+        storyboardId: found.storyboardId,
+        projectId: found.storyboard.projectId,
+        teamId: found.storyboard.project.teamId,
+        prompt: found.prompt,
+        negativePrompt: found.negativePrompt,
+        aspectRatio: found.aspectRatio,
+        duration: found.duration,
+        projectName: found.storyboard.project.name,
+      };
+    }
+  }
+
+  const params: VideoGenerationParams = {
+    prompt: scene?.prompt ?? "",
+    negativePrompt: scene?.negativePrompt ?? null,
+    aspectRatio: scene?.aspectRatio ?? "16:9",
+    duration: scene?.duration ?? 5,
+    projectName: scene?.projectName ?? null,
+  };
+
+  const retrieved = await provider.retrieve(job.providerJobId, params);
+
+  if (retrieved.status === "processing") {
+    return { status: "processing", job: toJobResponse(job) };
+  }
+
+  if (retrieved.status === "failed") {
+    if (scene) {
+      await markJobFailed({
+        jobId: job.id,
+        sceneId: scene.id,
+        storyboardId: scene.storyboardId,
+        error: new Error(retrieved.error),
+      });
+    } else {
+      await prisma.generationJob.update({
+        where: { id: job.id },
+        data: {
+          status: "failed",
+          errorMessage: retrieved.error.slice(0, 500),
+          completedAt: new Date(),
+        },
+      });
+    }
+    const failedJob = await prisma.generationJob.findUniqueOrThrow({
+      where: { id: job.id },
+    });
+    return { status: "failed", job: toJobResponse(failedJob) };
+  }
+
+  if (scene) {
+    await finalizeVideoResult({
+      jobId: job.id,
+      providerName: provider.name,
+      providerJobId: job.providerJobId,
+      result: retrieved.result,
+      scene,
+      userId: opts.userId,
+    });
+  } else {
+    await prisma.generationJob.update({
+      where: { id: job.id },
+      data: {
+        providerJobId: job.providerJobId,
+        status: "completed",
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  const finishedJob = await prisma.generationJob.findUniqueOrThrow({
+    where: { id: job.id },
+  });
+  return { status: "completed", job: toJobResponse(finishedJob) };
 }

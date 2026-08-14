@@ -245,9 +245,19 @@ any external API keys**.
   `MOCK_RENDER_DELAY_MS` to tune the simulated render latency (0 for instant).
 - Real providers (Kling, Runway, WAN, Hailuo, …) implement
   `VideoGenerationProvider` in `apps/web/src/lib/generation/providers.ts`,
-  register in `PROVIDER_REGISTRY`, and set `VIDEO_PROVIDER=<name>`. Async
-  providers return a `providerJobId`; point `GET /api/v1/generation-jobs/[id]`
-  pollers at them once in place.
+  register in `PROVIDER_REGISTRY`, and set `VIDEO_PROVIDER=<name>`.
+- **Async (two-phase) providers** — real render providers don't return
+  synchronously, so the pipeline supports async providers via `submit()`
+  (returns a `providerJobId` immediately) and `retrieve(providerJobId, params)`
+  (`processing` | `succeeded` | `failed`). `createVideoGenerationJob` submits
+  and returns the still-`processing` job; `GET /api/v1/generation-jobs/[id]`
+  calls `completeVideoGenerationJob`, which advances a `processing` job to
+  completion (persists files, creates the video `Asset`, syncs scene/storyboard)
+  once the provider reports it is done — so clients just poll the GET route.
+- `VIDEO_PROVIDER=mock-async` is a stateless simulation of an async provider
+  (tune latency with `MOCK_ASYNC_LATENCY_MS`) that exercises the full
+  submit → poll → complete flow offline; `mock` completes synchronously and
+  remains the default.
 - In mock mode the "video" is an SVG poster card derived from the scene prompt
   so the pipeline is exercisable end-to-end locally (Docker/Postgres optional —
   the routes also tolerate S3 being down).

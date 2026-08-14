@@ -215,3 +215,128 @@ export function getVideoProvider(
   }
   return factory();
 }
+
+// ============================================================
+// Async (two-phase) video providers
+// ============================================================
+// Real render providers (Kling, Runway, WAN, Hailuo, …) submit a job and
+// return a `providerJobId` immediately, then expose a `retrieve` call that is
+// polled until the render is done. This section defines that capability on top
+// of the sync `generate()` interface and ships a stateless mock that simulates
+// it, so the whole submit → poll → complete flow is exercisable offline.
+
+export interface VideoSubmitResult {
+  providerJobId: string;
+}
+
+export type VideoRetrieveResult =
+  | { status: "processing"; progress?: number }
+  | { status: "succeeded"; result: GenerationResult }
+  | { status: "failed"; error: string };
+
+export interface AsyncVideoGenerationProvider extends VideoGenerationProvider {
+  submit(params: VideoGenerationParams): Promise<VideoSubmitResult>;
+  /** `params` mirrors the original request; real providers may ignore it. */
+  retrieve(
+    providerJobId: string,
+    params: VideoGenerationParams,
+  ): Promise<VideoRetrieveResult>;
+}
+
+/** Capability check: is this provider two-phase (submit/poll/complete)? */
+export function isAsyncVideoProvider(
+  provider: VideoGenerationProvider,
+): provider is AsyncVideoGenerationProvider {
+  return (
+    typeof (provider as AsyncVideoGenerationProvider).submit === "function"
+  );
+}
+
+export interface MockAsyncVideoProviderConfig {
+  latencyMs?: number;
+  now?: () => number;
+}
+
+/**
+ * Stateless simulation of a real async video provider. `submit` encodes the
+ * submission timestamp in the provider job id; `retrieve` compares it against
+ * the (injectable) clock so the job is reported `processing` until
+ * `latencyMs` has elapsed, then `succeeded`. Because all state is derived
+ * from the job id + params, it can be resumed across separate requests —
+ * exactly like a real vendor — without any database bookkeeping.
+ */
+export class MockAsyncVideoProvider implements AsyncVideoGenerationProvider {
+  readonly name = "mock-async";
+
+  private readonly latencyMs: number;
+  private readonly now: () => number;
+
+  constructor(config: MockAsyncVideoProviderConfig = {}) {
+    this.latencyMs = Math.max(
+      0,
+      config.latencyMs ?? Number(process.env.MOCK_ASYNC_LATENCY_MS ?? 2000),
+    );
+    this.now = config.now ?? (() => Date.now());
+  }
+
+  /** Async providers use `submit` + `retrieve`; `generate` is not used. */
+  async generate(_params: VideoGenerationParams): Promise<GenerationResult> {
+    throw new Error(
+      "MockAsyncVideoProvider is two-phase: use submit() then retrieve()",
+    );
+  }
+
+  async submit(params: VideoGenerationParams): Promise<VideoSubmitResult> {
+    const startedAt = this.now();
+    const digest = createHash("sha1").update(params.prompt).digest("hex");
+    return { providerJobId: `mock_async_${digest.slice(0, 12)}_${startedAt}` };
+  }
+
+  async retrieve(
+    providerJobId: string,
+    params: VideoGenerationParams,
+  ): Promise<VideoRetrieveResult> {
+    const startedAt = Number(String(providerJobId).split("_").pop() ?? 0);
+    const elapsed = Math.max(0, this.now() - startedAt);
+
+    if (elapsed < this.latencyMs) {
+      const progress = this.latencyMs
+        ? Math.min(1, Number((elapsed / this.latencyMs).toFixed(2)))
+        : 1;
+      return { status: "processing", progress };
+    }
+
+    const dims = renderAspectDimensions(params.aspectRatio);
+    const svg = buildPosterSvg({
+      width: dims.width,
+      height: dims.height,
+      prompt: params.prompt,
+      duration: params.duration,
+      aspectRatio: params.aspectRatio,
+    });
+    const digest = createHash("sha1").update(providerJobId).digest("hex");
+
+    return {
+      status: "succeeded",
+      result: {
+        provider: this.name,
+        providerJobId,
+        width: dims.width,
+        height: dims.height,
+        duration: params.duration,
+        files: [
+          {
+            filename: `mock-async-${digest.slice(0, 8)}.svg`,
+            contentType: "image/svg+xml",
+            body: Buffer.from(svg, "utf8"),
+          },
+        ],
+        metadata: { mock: true, async: true, format: "svg-postcard" },
+      },
+    };
+  }
+}
+
+// Register the async mock provider. `mock` remains the default; `mock-async`
+// demonstrates (and tests) the full submit → poll → complete flow.
+PROVIDER_REGISTRY["mock-async"] = () => new MockAsyncVideoProvider();
