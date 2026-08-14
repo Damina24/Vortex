@@ -171,6 +171,90 @@ const AUDIO_PROVIDER_REGISTRY: Record<string, () => AudioGenerationProvider> = {
 };
 
 /**
+ * Configuration for the OpenAI TTS provider. Kept injectable so unit tests can
+ * stub the key, base URL, and fetch implementation without a real key.
+ */
+export interface OpenAiAudioProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Real voiceover provider backed by the OpenAI Text-to-Speech API
+ * (`POST /v1/audio/speech`). The response body is returned as an MP3 audio
+ * asset. This is the keyless-free counterpart to `MockAudioProvider`: it makes
+ * one network request, so it must be selected with `AUDIO_PROVIDER=openai`.
+ */
+export class OpenAiAudioProvider implements AudioGenerationProvider {
+  readonly name = "openai";
+
+  constructor(private readonly config: OpenAiAudioProviderConfig = {}) {}
+
+  async generate(
+    params: AudioGenerationParams,
+  ): Promise<AudioGenerationResult> {
+    if (params.kind !== "voiceover") {
+      throw new Error("OpenAI TTS only supports voiceover generation");
+    }
+
+    const apiKey = this.config.apiKey ?? process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("OPENAI_API_KEY is required when AUDIO_PROVIDER=openai");
+    }
+
+    const fetchImpl = this.config.fetchImpl ?? globalThis.fetch;
+    const baseUrl = this.config.baseUrl ?? "https://api.openai.com/v1";
+    const voice = params.voice || "alloy";
+    const model = "tts-1";
+
+    const digest = createHash("sha1")
+      .update(`${params.prompt}:${voice}`)
+      .digest("hex");
+
+    const response = await fetchImpl(`${baseUrl}/audio/speech`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: params.prompt,
+        voice,
+        response_format: "mp3",
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `OpenAI TTS request failed with status ${response.status}`,
+      );
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const body = Buffer.from(arrayBuffer);
+
+    return {
+      provider: this.name,
+      providerJobId: `openai_tts_${digest.slice(0, 12)}`,
+      duration: Math.max(1, Math.floor(params.duration)),
+      files: [
+        {
+          filename: `voiceover-${digest.slice(0, 8)}.mp3`,
+          contentType: "audio/mpeg",
+          body,
+        },
+      ],
+      metadata: { model, voice, format: "mp3", provider: "openai" },
+    };
+  }
+}
+
+// Register the real provider alongside mock. The default remains `mock`.
+AUDIO_PROVIDER_REGISTRY.openai = () => new OpenAiAudioProvider();
+
+/**
  * Resolves an audio generation provider by name. Defaults to the
  * `AUDIO_PROVIDER` env var (or `mock` for local development). Unknown names
  * throw `AudioProviderUnavailableError` so callers can map it to a 503.

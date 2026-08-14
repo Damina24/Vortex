@@ -270,3 +270,17 @@ null). No schema changes are required.
   `src/lib/generation/audio-providers.ts` and register in `AUDIO_PROVIDER_REGISTRY`.
 - The mock provider emits a valid silent PCM WAV; it is deterministic per prompt
   (same prompt + duration ⇒ identical bytes and `providerJobId`).
+
+### Real provider: OpenAI TTS (`AUDIO_PROVIDER=openai`)
+
+An optional real voiceover provider backed by the OpenAI Text-to-Speech API
+(`POST /v1/audio/speech`), producing an MP3 asset.
+
+- Set `AUDIO_PROVIDER=openai` and provide `OPENAI_API_KEY` (or pass
+  `apiKey`/`baseUrl` to the injected `OpenAiAudioProviderConfig`).
+- Voiceover only — `music` kind is rejected with a clear error.
+- Defaults: voice `alloy`, model `tts-1`, response format `mp3`.
+- The provider is injected (`fetchImpl`/`baseUrl`/`apiKey`) so its request
+  building and response parsing are unit-tested with a stubbed `fetch`
+  (`openai-audio-provider.test.ts`), and the registry entry keeps `mock` as the
+  safe default when `AUDIO_PROVIDER` is unset or unknown.
