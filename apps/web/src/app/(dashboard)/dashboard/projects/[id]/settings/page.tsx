@@ -32,6 +32,19 @@ export default async function ProjectSettingsPage({
     notFound();
   }
 
+  const membership = await prisma.teamMember.findFirst({
+    where: { userId: session.user.id },
+    select: { teamId: true },
+  });
+
+  const brandProfiles = membership
+    ? await prisma.brandDna.findMany({
+        where: { teamId: membership.teamId },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      })
+    : [];
+
   const settings: ProjectSettingsValue = {
     id: project.id,
     name: project.name,
@@ -39,6 +52,7 @@ export default async function ProjectSettingsPage({
     objective: project.objective,
     status: project.status,
     targetPlatforms: project.targetPlatforms as string[],
+    brandDnaId: project.brandDnaId,
   };
 
   return (
@@ -55,7 +69,7 @@ export default async function ProjectSettingsPage({
         <p className="text-muted-foreground">Configure {project.name}</p>
       </div>
 
-      <ProjectSettingsForm project={settings} />
+      <ProjectSettingsForm project={settings} brandProfiles={brandProfiles} />
     </div>
   );
 }

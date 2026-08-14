@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import toast from "react-hot-toast";
 import axios from "axios";
 import { Save } from "lucide-react";
@@ -13,6 +14,12 @@ export type ProjectSettingsValue = {
   objective: "conversion" | "awareness" | "engagement" | null;
   status: "draft" | "active" | "paused" | "completed" | "archived";
   targetPlatforms: string[];
+  brandDnaId: string | null;
+};
+
+export type BrandProfileOption = {
+  id: string;
+  name: string;
 };
 
 const OBJECTIVES = [
@@ -38,8 +45,10 @@ const inputClass =
 
 export function ProjectSettingsForm({
   project,
+  brandProfiles = [],
 }: {
   project: ProjectSettingsValue;
+  brandProfiles?: BrandProfileOption[];
 }) {
   const router = useRouter();
   const [name, setName] = useState(project.name);
@@ -48,6 +57,7 @@ export function ProjectSettingsForm({
     "conversion" | "awareness" | "engagement"
   >(project.objective ?? "conversion");
   const [status, setStatus] = useState(project.status);
+  const [brandDnaId, setBrandDnaId] = useState(project.brandDnaId ?? "");
   const [platformsInput, setPlatformsInput] = useState(
     project.targetPlatforms.join(", "),
   );
@@ -67,6 +77,7 @@ export function ProjectSettingsForm({
         description: description.trim() || null,
         objective,
         status,
+        brandDnaId: brandDnaId || null,
         targetPlatforms,
       });
 
@@ -177,6 +188,35 @@ export function ProjectSettingsForm({
         />
         <p className="text-xs text-muted-foreground">
           Comma-separated platform slugs passed to the AI strategy engine.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="brandDna" className="text-sm font-medium">
+          Brand profile
+        </label>
+        <select
+          id="brandDna"
+          value={brandDnaId}
+          onChange={(e) => setBrandDnaId(e.target.value)}
+          className={inputClass}
+        >
+          <option value="">None — let the AI use defaults</option>
+          {brandProfiles.map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.name}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Assigned profiles auto-enrich AI strategy and prompt generation with
+          your brand&apos;s look, voice, and compliance rules.{" "}
+          <Link
+            href="/dashboard/brand-dna"
+            className="text-vortex-600 hover:text-vortex-500 font-medium"
+          >
+            Manage brand profiles
+          </Link>
         </p>
       </div>
 

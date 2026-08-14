@@ -107,6 +107,25 @@ export async function PUT(
       );
     }
 
+    // Brand profiles are team-scoped. Only allow assigning a profile that
+    // belongs to the project's team — otherwise the AI pipeline could read
+    // another team's brand data into prompts.
+    if (validation.data.brandDnaId !== undefined) {
+      const brandDnaId = validation.data.brandDnaId;
+      if (brandDnaId) {
+        const owned = await prisma.brandDna.findFirst({
+          where: { id: brandDnaId, teamId: project.teamId },
+          select: { id: true },
+        });
+        if (!owned) {
+          return NextResponse.json(
+            { success: false, error: "Brand profile not found in your workspace" },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
     const updated = await prisma.project.update({
       where: { id: params.id },
       data: validation.data,

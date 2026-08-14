@@ -169,18 +169,35 @@ export default async function ProjectDetailPage({
             <p className="text-sm text-muted-foreground mt-1">
               Brand guidelines applied to this project
             </p>
+            <Link
+              href={`/dashboard/projects/${params.id}/settings`}
+              className="mt-3 inline-flex items-center gap-1 text-sm text-vortex-600 hover:text-vortex-500 font-medium"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Change in settings
+            </Link>
           </div>
         ) : (
           <div className="rounded-xl border border-dashed p-6 text-center">
             <p className="text-sm text-muted-foreground mb-3">
               No brand DNA assigned to this project
             </p>
-            <Link
-              href={`/dashboard/brand-dna/new?projectId=${params.id}`}
-              className="text-sm text-vortex-600 hover:text-vortex-500 font-medium"
-            >
-              Create Brand DNA
-            </Link>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Link
+                href={`/dashboard/projects/${params.id}/settings`}
+                className="inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium text-foreground hover:border-vortex-500/50 transition-colors"
+              >
+                <Settings className="h-4 w-4" />
+                Assign a profile
+              </Link>
+              <Link
+                href="/dashboard/brand-dna/new"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-vortex-600 px-4 py-2 text-sm font-medium text-white hover:bg-vortex-700 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Create Brand DNA
+              </Link>
+            </div>
           </div>
         )}
       </div>
