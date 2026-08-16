@@ -12,6 +12,7 @@ import {
   BarChart3,
   Palette,
   Users,
+  Send,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -54,6 +55,11 @@ const sidebarItems = [
     label: "Brand DNA",
     href: "/dashboard/brand-dna",
     icon: Palette,
+  },
+  {
+    label: "Publishing",
+    href: "/dashboard/publishing",
+    icon: Send,
   },
   {
     label: "Team",

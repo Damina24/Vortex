@@ -264,6 +264,29 @@ any external API keys**.
 - Every credit spend is a `credit_transactions` "usage" row linked to the job,
   and `related_job_id` preserves the job → transaction link.
 
+### Real provider: Kling AI (`VIDEO_PROVIDER=kling`)
+
+An optional **real** video provider backed by the Kling AI text-to-video API.
+
+- Set `VIDEO_PROVIDER=kling` and provide `KLING_API_KEY` + `KLING_API_SECRET`
+  (from the Kling AI developer console). Optionally set `KLING_MODEL` (default
+  `kling-v1`) and `KLING_MODE` via the provider config (`std` | `pro`,
+  default `std`).
+- Auth uses Kling's access-key/secret signing: the `Api-Key`, `Api-Secret`,
+  `Timestamp` (Unix seconds), and `Signature` (hex HMAC-SHA256 of the timestamp
+  keyed by the secret) headers.
+- Kling renders asynchronously, so the provider implements the two-phase
+  interface: `submit()` creates a task (`POST /v1/videos/text2video`,
+  `duration` is rounded to Kling's supported `5`/`10` clips) and
+  `retrieve(providerJobId, params)` polls `GET /v1/videos/text2video/{id}`,
+  returning `processing` while queued and, once `succeed`, downloading the
+  finished MP4 and wrapping it in a `GenerationResult` (real `video/mp4`
+  asset). Failed renders surface Kling's `task_status_msg` as the job error.
+- The provider is wired through the exact same submit → poll → complete flow as
+  `mock-async` (documented above), so no pipeline changes were required —
+  clients already poll `GET /api/v1/generation-jobs/[id]`.
+
+
 ### Audio generation (voiceover / music)
 
 Audio uses the **exact same** `generation_jobs` + `credit_transactions` + `Asset`
@@ -294,3 +317,61 @@ An optional real voiceover provider backed by the OpenAI Text-to-Speech API
   building and response parsing are unit-tested with a stubbed `fetch`
   (`openai-audio-provider.test.ts`), and the registry entry keeps `mock` as the
   safe default when `AUDIO_PROVIDER` is unset or unknown.
+
+### Publishing (direct platform publishing)
+
+Publishes finished video assets directly to platforms and records each publish
+as a `Campaign` (+ a single `CampaignVariant`) so you can track what has gone
+live. The layer mirrors the generation-provider design:
+
+- **Provider abstraction** — `src/lib/publishing/providers.ts` defines the
+  `PublishingProvider` interface (`publish(params) → PublishedResult`) and a
+  registry resolved by `getPublishingProvider()` through the
+  `PUBLISHING_PROVIDER` env var (default `mock`). A deterministic
+  `MockPublishingProvider` ships for offline development.
+- **Orchestration** — `src/lib/publishing/jobs.ts` `publishAssetToPlatform()`
+  enforces ownership (project must be the caller's, asset must belong to that
+  project), calls the provider, and persists the result onto a `Campaign`
+  (+ `CampaignVariant`) and the asset's `published` metadata (platform id,
+  shareable URL, provider, timestamp).
+- **Endpoints** — `POST /api/v1/publishing`
+  (`{ projectId, assetId, platform, title, description, tags, visibility }`)
+  publishes; `GET /api/v1/publishing` lists the user's published campaigns;
+  `GET /api/v1/publishing/[id]` fetches one; `GET /api/v1/projects/[id]/assets`
+  lists a project's video assets for the picker.
+- **UI** — the **Publishing** page (`/dashboard/publishing`, gated by
+  `NEXT_PUBLIC_ENABLE_PUBLISHING=true`) offers a publish form and a list of
+  published campaigns.
+- **Real provider: YouTube** — `PUBLISHING_PROVIDER=youtube` publishes via the
+  YouTube Data API v3 resumable upload: it downloads the asset bytes, obtains a
+  resumable session URI (`POST …/upload/youtube/v3/videos?uploadType=resumable`),
+  uploads the bytes, and returns the new video id + watch URL. Auth is a
+  short-lived `YOUTUBE_ACCESS_TOKEN` (refresh/obtaining is left to your auth
+  layer). The provider is fully injected (`accessToken`/`fetchImpl`/`now`) and
+    unit-tested with a stubbed `fetch`.
+- **Real provider: Meta** — `PUBLISHING_PROVIDER=meta` publishes to a Facebook
+  Page via the Meta Graph API (`POST /{page-id}/videos`) using `file_url` pull,
+  so Meta fetches the finished asset from its URL. Auth is a **Page-scoped**
+  `META_ACCESS_TOKEN` plus the target `META_PAGE_ID`; privacy maps to
+  Meta's `privacy.value` (public → `EVERYONE`, unlisted → `ALL_FRIENDS`,
+  private → `SELF`). Returns the Graph API video id + `facebook.com/watch?v=` URL.
+  Fully injected (`accessToken`/`pageId`/`fetchImpl`/`now`) and unit-tested with
+  a stubbed `fetch`.
+- **Real provider: TikTok** — `PUBLISHING_PROVIDER=tiktok` publishes via the
+  TikTok Content Posting API (`POST …/v2/post/publish/video/init/`). It uses
+  `source_info.source = "PULL_FROM_URL"`, so TikTok pulls the finished asset
+  from its URL rather than receiving uploaded bytes, and returns a `publish_id`
+  that is persisted as the platform id (visibility maps to TikTok's
+  `privacy_level`: public → `PUBLIC_TO_EVERYONE`, unlisted → `FOLLOWERS`,
+  private → `SELF_ONLY`). Auth is a `TIKTOK_ACCESS_TOKEN` with the
+  `video.publish` scope. Fully injected and unit-tested with a stubbed `fetch`.
+- **A/B testing** - the Publishing page gives every published campaign an
+  expandable A/B panel. It reads live per-variant data from
+  `GET /api/v1/publishing/[id]`, adds a second creative via
+  `POST /api/v1/publishing/[id]/variants` (`addCampaignVariant`), and promotes
+  a winner via `POST /api/v1/publishing/[id]/winner` (`markCampaignWinner`).
+  Both endpoints return the advisory result of the pure `evaluateAbTest`
+  evaluator in `src/lib/publishing/ab-test.ts` (ranked variants, winner,
+  confidence, recommendation) so the UI can surface context - a human may still
+  override the statistical leader.
+
