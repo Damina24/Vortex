@@ -17,6 +17,7 @@ import type {
   AnalyticsSummary,
 } from "@/lib/analytics/metrics";
 import type { PerformanceMetrics, PerformancePrediction } from "@/types";
+import { CampaignAbPanel } from "@/components/analytics/campaign-ab-panel";
 
 const formatNumber = (n: number) => n.toLocaleString();
 const formatPercent = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -252,6 +253,7 @@ export default function AnalyticsPage() {
           <MetricBarChart metrics={summary.metrics} />
           <SeriesChart series={summary.series} />
           <PredictionCard prediction={summary.prediction} />
+          <CampaignAbPanel />
         </div>
       )}
     </div>
