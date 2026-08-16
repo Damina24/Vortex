@@ -297,6 +297,34 @@ An optional **real** video provider backed by the Kling AI text-to-video API.
   show the active profile as a "Brand DNA" chip, and the new-storyboard page
   surfaces whether a profile will apply to the project.
 
+### Real provider: FFmpeg (`VIDEO_PROVIDER=ffmpeg`)
+
+An optional **local** render provider that produces a real, playable MP4 using
+the `ffmpeg` binary on the machine running the web app — no third-party API key
+required.
+
+- Set `VIDEO_PROVIDER=ffmpeg`. ffmpeg must be installed and on `PATH`, or point
+  `FFMPEG_PATH` at the binary. Tune the simulated render latency with
+  `FFMPEG_RENDER_DELAY_MS` (ms, default `1500`).
+- **Brand DNA palette** — the frame background is driven by the brand colors the
+  prompt-enrichment already injects: `extractHexColors` reads the `#hex` tokens
+  appended to the render prompt (first color → background, second → accent) and
+  falls back to the VORTEX gradient when none are present.
+- **Async two-phase** — implements `submit()`/`retrieve()` like Kling, so it
+  rides the same submit → poll → complete flow (`GET /api/v1/generation-jobs/[id]`);
+  `retrieve()` shells out to ffmpeg and encodes H.264 `yuv420p` with `faststart`
+  for browser/platform-safe playback (a `drawtext` overlay burns the prompt onto
+  the frame).
+- The pure helpers (`buildFfmpegRenderSpec`, `buildFfmpegArgs`,
+  `escapeFfmpegFilterText`) are unit-tested without a real binary
+  (`ffmpeg-video-provider.test.ts`); `renderMp4WithFfmpeg` and the provider are
+  dependency-injected so the suite runs offline.
+- **Runtime caveat** — ffmpeg needs a long-running OS process and CPU, so this
+  provider is intended for a **containerized / dedicated worker** (Node), not the
+  Vercel serverless runtime. On serverless, prefer `VIDEO_PROVIDER=kling` or route
+  renders to a worker that has ffmpeg available. The `mock` providers remain the
+  safe default when `VIDEO_PROVIDER` is unset or unknown.
+
 
 ### Audio generation (voiceover / music)
 
@@ -385,4 +413,12 @@ live. The layer mirrors the generation-provider design:
   evaluator in `src/lib/publishing/ab-test.ts` (ranked variants, winner,
   confidence, recommendation) so the UI can surface context - a human may still
   override the statistical leader.
+- **Campaign A/B analytics** - the **Analytics** page (`/dashboard/analytics`)
+  renders a live "A/B test results" panel from `GET /api/v1/analytics/campaigns`:
+  it summarizes the user's published campaigns (`summarizeCampaigns` in
+  `src/lib/publishing/campaign-ab-summary.ts`) with per-variant metrics, the
+  current statistical leader, any chosen winner, confidence and the evaluator's
+  recommendation — so winners surface outside the Publishing page too. Same pure
+  `evaluateAbTest` evaluator, no new schema, unit-tested
+  (`campaign-ab-summary.test.ts`).
 

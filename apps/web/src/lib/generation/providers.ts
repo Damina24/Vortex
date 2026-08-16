@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "crypto";
+import { spawn } from "child_process";
 
 /**
  * Video generation provider abstraction. Mirrors the AI service's
@@ -61,7 +62,7 @@ const ASPECT_DIMENSIONS: Record<string, { width: number; height: number }> = {
 
 const DEFAULT_DIMENSIONS = { width: 1280, height: 720 };
 
-function renderAspectDimensions(aspectRatio: string) {
+export function renderAspectDimensions(aspectRatio: string) {
   return ASPECT_DIMENSIONS[aspectRatio] ?? DEFAULT_DIMENSIONS;
 }
 
@@ -340,6 +341,289 @@ export class MockAsyncVideoProvider implements AsyncVideoGenerationProvider {
 // Register the async mock provider. `mock` remains the default; `mock-async`
 // demonstrates (and tests) the full submit → poll → complete flow.
 PROVIDER_REGISTRY["mock-async"] = () => new MockAsyncVideoProvider();
+// ============================================================
+// FFmpeg — local H.264 render provider (async two-phase)
+// ============================================================
+// Renders a real, playable MP4 on the machine running the web app using the
+// `ffmpeg` binary (selected with VIDEO_PROVIDER=ffmpeg). The frame palette is
+// derived from the Brand DNA colors already present in the enriched prompt
+// (`#hex` tokens the render-prompt enrichment appends) and the scene prompt is
+// burned onto the frame with a `drawtext` overlay, then encoded to H.264
+// (yuv420p, faststart) for broad browser/platform compatibility. Like every
+// async provider it is two-phase: `submit()` returns a job id and `retrieve()`
+// renders on poll, so a long render is resumable across requests.
+//
+// The heavy pieces are small and pure (`extractHexColors`,
+// `buildFfmpegRenderSpec`, `escapeFfmpegFilterText`, `buildFfmpegArgs`) so they
+// are unit-tested without a real ffmpeg binary; `renderMp4WithFfmpeg` shells
+// out, and `FfmpegVideoProvider` accepts an injected `renderImpl` for tests.
+
+export interface FfmpegRenderSpec {
+  width: number;
+  height: number;
+  duration: number;
+  fps: number;
+  /** Frame background color as a hex without the `#` (e.g. "1E1B4B"). */
+  backgroundColorHex: string;
+  accentHex: string;
+  /** Text burned onto the frame (the truncated prompt). */
+  overlayTitle: string;
+  drawText: boolean;
+}
+
+/**
+ * Extracts and normalizes `#rgb` / `#rrggbb` color tokens embedded in a prompt
+ * (the brand colors the render-prompt enrichment appends). 3-digit forms are
+ * expanded to 6-digit so ffmpeg's `color=` source accepts them.
+ */
+export function extractHexColors(text: string): string[] {
+  const matches = text.match(/#([0-9a-f]{3}|[0-9a-f]{6})(?![\w#])/gi) ?? [];
+  return matches.map((token) => {
+    const hex = token.replace("#", "").toLowerCase();
+    return `#${hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex}`;
+  });
+}
+
+const DEFAULT_BG_HEX = "1E1B4B";
+const DEFAULT_ACCENT_HEX = "7C3AED";
+
+/**
+ * Builds a deterministic render spec for a scene prompt. Colors are derived
+ * from any `#hex` tokens in the (already brand-enriched) prompt so output
+ * matches the project's Brand DNA palette; missing colors fall back to the
+ * VORTEX brand gradient.
+ */
+export function buildFfmpegRenderSpec(
+  params: VideoGenerationParams,
+): FfmpegRenderSpec {
+  const dims = renderAspectDimensions(params.aspectRatio);
+  const colors = extractHexColors(params.prompt);
+  return {
+    width: dims.width,
+    height: dims.height,
+    duration: params.duration,
+    fps: 25,
+    backgroundColorHex: (colors[0] ?? `#${DEFAULT_BG_HEX}`).replace("#", ""),
+    accentHex: (colors[1] ?? `#${DEFAULT_ACCENT_HEX}`).replace("#", ""),
+    overlayTitle: normalizePosterText(params.prompt, 60),
+    drawText: true,
+  };
+}
+
+/**
+ * Escapes text for safe use inside a ffmpeg `drawtext` filter expression
+ * (colons, commas, semicolons and quotes all terminate the filter grammar).
+ */
+export function escapeFfmpegFilterText(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/:/g, "\\:")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;")
+    .replace(/'/g, "\\'");
+}
+
+/**
+ * Builds a stable, deterministic ffmpeg argument vector for the render spec.
+ * Produces H.264 `yuv420p` (mobile/browser-safe) with a `drawtext` overlay of
+ * the scene prompt and writes the encoded bytes to stdout.
+ */
+export function buildFfmpegArgs(spec: FfmpegRenderSpec): string[] {
+  const size = `${spec.width}x${spec.height}`;
+  const args: string[] = [
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=0x${spec.backgroundColorHex}:s=${size}:d=${spec.duration}:r=${spec.fps}`,
+  ];
+
+  if (spec.drawText && spec.overlayTitle) {
+    const fontSize = Math.max(
+      40,
+      Math.round(Math.min(spec.width, spec.height) / 22),
+    );
+    const text =
+      `drawtext=text='${escapeFfmpegFilterText(spec.overlayTitle)}'` +
+      `:fontcolor=white:fontsize=${fontSize}` +
+      `:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.35:boxborderw=20`;
+    args.push("-vf", text);
+  }
+
+  args.push(
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-t",
+    String(spec.duration),
+    "-f",
+    "mp4",
+    "-",
+  );
+
+  return args;
+}
+export interface RenderMp4Options {
+  ffmpegPath?: string;
+}
+
+/**
+ * Renders an MP4 by shelling out to ffmpeg, capturing the encoded bytes from
+ * stdout into a Buffer. Rejects with the ffmpeg stderr tail when the binary is
+ * missing or the encode fails.
+ */
+export async function renderMp4WithFfmpeg(
+  spec: FfmpegRenderSpec,
+  opts: RenderMp4Options = {},
+): Promise<Buffer> {
+  const ffmpegPath = opts.ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg";
+  const args = buildFfmpegArgs(spec);
+
+  return new Promise<Buffer>((resolve, reject) => {
+    const child = spawn(ffmpegPath, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const chunks: Buffer[] = [];
+    const stderr: string[] = [];
+    let settled = false;
+
+    child.stdout.on("data", (c: Buffer) => chunks.push(c));
+    child.stderr.on("data", (c: Buffer) => {
+      const text = c.toString();
+      stderr.push(text);
+      // Keep a bounded tail so failures don't accumulate unbounded output.
+      if (stderr.length > 20) stderr.splice(0, stderr.length - 20);
+    });
+
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(
+        new Error(
+          `Failed to start ffmpeg ("${ffmpegPath}"): ${error.message}. ` +
+            `Install ffmpeg and ensure it is on PATH, or set FFMPEG_PATH.`,
+        ),
+      );
+    });
+
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      if (code !== 0) {
+        reject(
+          new Error(
+            `ffmpeg exited with code ${code}: ${stderr.join("").slice(-1200)}`,
+          ),
+        );
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+  });
+}
+
+export interface FfmpegVideoProviderConfig {
+  latencyMs?: number;
+  now?: () => number;
+  ffmpegPath?: string;
+  /** Injectable renderer (used by tests to avoid needing a real ffmpeg). */
+  renderImpl?: (spec: FfmpegRenderSpec) => Promise<Buffer>;
+}
+
+/**
+ * Async two-phase provider that renders a real MP4 with ffmpeg. `submit`
+ * encodes the request in the job id; `retrieve` reports `processing` until the
+ * (simulated) latency elapses, then runs the encoder and wraps the bytes in a
+ * `GenerationResult` that the standard finalize path persists as a video asset.
+ */
+export class FfmpegVideoProvider implements AsyncVideoGenerationProvider {
+  readonly name = "ffmpeg";
+
+  private readonly latencyMs: number;
+  private readonly now: () => number;
+  private readonly ffmpegPath?: string;
+  private readonly renderImpl?: (spec: FfmpegRenderSpec) => Promise<Buffer>;
+
+  constructor(config: FfmpegVideoProviderConfig = {}) {
+    this.latencyMs = Math.max(
+      0,
+      config.latencyMs ??
+        Number(process.env.FFMPEG_RENDER_DELAY_MS ?? 1500),
+    );
+    this.now = config.now ?? (() => Date.now());
+    this.ffmpegPath = config.ffmpegPath;
+    this.renderImpl = config.renderImpl;
+  }
+
+  /** Async providers use `submit` + `retrieve`; `generate` is not used. */
+  async generate(_params: VideoGenerationParams): Promise<GenerationResult> {
+    throw new Error(
+      "FfmpegVideoProvider is two-phase: use submit() then retrieve()",
+    );
+  }
+
+  async submit(params: VideoGenerationParams): Promise<VideoSubmitResult> {
+    const startedAt = this.now();
+    const digest = createHash("sha1").update(params.prompt).digest("hex");
+    return { providerJobId: `ffmpeg_${digest.slice(0, 12)}_${startedAt}` };
+  }
+
+  async retrieve(
+    providerJobId: string,
+    params: VideoGenerationParams,
+  ): Promise<VideoRetrieveResult> {
+    const startedAt = Number(String(providerJobId).split("_").pop() ?? 0);
+    const elapsed = Math.max(0, this.now() - startedAt);
+
+    if (elapsed < this.latencyMs) {
+      const progress = this.latencyMs
+        ? Math.min(1, Number((elapsed / this.latencyMs).toFixed(2)))
+        : 1;
+      return { status: "processing", progress };
+    }
+
+    const spec = buildFfmpegRenderSpec(params);
+    const body = this.renderImpl
+      ? await this.renderImpl(spec)
+      : await renderMp4WithFfmpeg(spec, { ffmpegPath: this.ffmpegPath });
+    const digest = createHash("sha1").update(providerJobId).digest("hex");
+
+    return {
+      status: "succeeded",
+      result: {
+        provider: this.name,
+        providerJobId,
+        width: spec.width,
+        height: spec.height,
+        duration: params.duration,
+        files: [
+          {
+            filename: `vortex-render-${digest.slice(0, 8)}.mp4`,
+            contentType: "video/mp4",
+            body,
+          },
+        ],
+        metadata: {
+          provider: "ffmpeg",
+          codec: "h264",
+          pixelFormat: "yuv420p",
+          backgroundColor: spec.backgroundColorHex,
+          accentColor: spec.accentHex,
+        },
+      },
+    };
+  }
+}
+
+// Register the real local renderer. `mock` remains the default; set
+// VIDEO_PROVIDER=ffmpeg (with ffmpeg on PATH or FFMPEG_PATH set) to produce
+// actual MP4 files end-to-end without any third-party API key.
+PROVIDER_REGISTRY.ffmpeg = () => new FfmpegVideoProvider();
+
 // ============================================================
 // Kling AI — real text-to-video provider
 // ============================================================
