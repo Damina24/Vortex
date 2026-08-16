@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
-import { ArrowLeft, Plus, Film, Wand2 } from "lucide-react";
+import { ArrowLeft, Plus, Film, Wand2, Palette } from "lucide-react";
 import { StoryboardAiPanel } from "@/components/ai/storyboard-ai-panel";
 import { ScenePromptEnhancer } from "@/components/scenes/scene-prompt-enhancer";
 import type { AiStoryboardStrategy } from "@/types";
@@ -66,6 +66,15 @@ export default async function StoryboardDetailPage({
             <p className="text-muted-foreground">
               {storyboard.project.name}
             </p>
+            {storyboard.project.brandDna && (
+              <Link
+                href="/dashboard/brand-dna"
+                className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-vortex-500/40 bg-vortex-50 px-2.5 py-1 text-xs font-medium text-vortex-700 transition-colors hover:border-vortex-500 dark:bg-vortex-950/50 dark:text-vortex-300"
+              >
+                <Palette className="h-3.5 w-3.5" />
+                Brand DNA: {storyboard.project.brandDna.name}
+              </Link>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <Link

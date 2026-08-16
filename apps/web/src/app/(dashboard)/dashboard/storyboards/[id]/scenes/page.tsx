@@ -7,7 +7,7 @@ import { SceneActions } from "@/components/scenes/scene-actions";
 import { ScenePromptEnhancer } from "@/components/scenes/scene-prompt-enhancer";
 import { SceneVideoGenerator } from "@/components/scenes/scene-video-generator";
 import Link from "next/link";
-import { ArrowLeft, Plus, Film } from "lucide-react";
+import { ArrowLeft, Plus, Film, Palette } from "lucide-react";
 
 export default async function StoryboardScenesPage({
   params,
@@ -29,7 +29,11 @@ export default async function StoryboardScenesPage({
     },
     include: {
       project: {
-        select: { id: true, name: true },
+        select: {
+          id: true,
+          name: true,
+          brandDna: { select: { id: true, name: true } },
+        },
       },
       scenes: {
         orderBy: { orderIndex: "asc" },
@@ -69,6 +73,12 @@ export default async function StoryboardScenesPage({
             <p className="text-muted-foreground">
               {storyboard.name} — {storyboard.project.name}
             </p>
+            {storyboard.project.brandDna && (
+              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-vortex-500/40 bg-vortex-50 px-2.5 py-1 text-xs font-medium text-vortex-700 dark:bg-vortex-950/50 dark:text-vortex-300">
+                <Palette className="h-3.5 w-3.5" />
+                Brand DNA: {storyboard.project.brandDna.name}
+              </span>
+            )}
           </div>
           <Link
             href={`/dashboard/storyboards/${params.id}/scenes/new`}

@@ -10,6 +10,7 @@ import {
   type VideoGenerationParams,
 } from "./providers";
 import { storeGeneratedFiles } from "./storage";
+import { enrichScenePrompts, type BrandDnaRow } from "@/lib/brand-dna";
 
 /** Thrown when a scene does not exist or is not owned by the caller. */
 export class SceneNotFoundError extends Error {
@@ -121,13 +122,23 @@ export async function createVideoGenerationJob(opts: {
       storyboard: { project: { createdBy: userId } },
     },
     include: {
-      storyboard: { include: { project: true } },
+      storyboard: { include: { project: { include: { brandDna: true } } } },
     },
   });
 
   if (!scene) {
     throw new SceneNotFoundError();
   }
+
+  // Apply the project's assigned Brand DNA to the render request: the visual
+  // style guide (colors/typography/logo) is appended to the prompt and the
+  // brand's forbidden colors/words are pushed into the negative prompt. The
+  // scene's stored prompts are never mutated.
+  const enriched = enrichScenePrompts({
+    prompt: scene.prompt,
+    negativePrompt: scene.negativePrompt,
+    brand: scene.storyboard.project.brandDna,
+  });
 
   const provider =
     typeof opts.provider === "string"
@@ -155,8 +166,8 @@ export async function createVideoGenerationJob(opts: {
       status: "queued",
       creditsConsumed: cost,
       inputParams: {
-        prompt: scene.prompt,
-        negativePrompt: scene.negativePrompt,
+        prompt: enriched.prompt,
+        negativePrompt: enriched.negativePrompt,
         aspectRatio: scene.aspectRatio,
         duration: scene.duration,
         orderIndex: scene.orderIndex,
@@ -179,8 +190,8 @@ export async function createVideoGenerationJob(opts: {
   });
 
   const params: VideoGenerationParams = {
-    prompt: scene.prompt,
-    negativePrompt: scene.negativePrompt,
+    prompt: enriched.prompt,
+    negativePrompt: enriched.negativePrompt,
     aspectRatio: scene.aspectRatio,
     duration: scene.duration,
     projectName: scene.storyboard.project.name,
@@ -322,6 +333,8 @@ interface VideoSceneContext {
   aspectRatio: string;
   duration: number;
   projectName: string | null;
+  /** The project's assigned brand profile (used to rebuild enriched prompts). */
+  brandDna: BrandDnaRow | null | undefined;
 }
 
 /** Persists a finished render: store files, create the asset, mark complete. */
@@ -429,7 +442,9 @@ export async function completeVideoGenerationJob(opts: {
   if (job.sceneId) {
     const found = await prisma.scene.findFirst({
       where: { id: job.sceneId },
-      include: { storyboard: { include: { project: true } } },
+      include: {
+        storyboard: { include: { project: { include: { brandDna: true } } } },
+      },
     });
     if (found) {
       scene = {
@@ -443,13 +458,22 @@ export async function completeVideoGenerationJob(opts: {
         aspectRatio: found.aspectRatio,
         duration: found.duration,
         projectName: found.storyboard.project.name,
+        brandDna: found.storyboard.project.brandDna,
       };
     }
   }
 
+  const enriched = scene
+    ? enrichScenePrompts({
+        prompt: scene.prompt,
+        negativePrompt: scene.negativePrompt,
+        brand: scene.brandDna,
+      })
+    : { prompt: "", negativePrompt: null };
+
   const params: VideoGenerationParams = {
-    prompt: scene?.prompt ?? "",
-    negativePrompt: scene?.negativePrompt ?? null,
+    prompt: enriched.prompt,
+    negativePrompt: enriched.negativePrompt,
     aspectRatio: scene?.aspectRatio ?? "16:9",
     duration: scene?.duration ?? 5,
     projectName: scene?.projectName ?? null,

@@ -9,6 +9,7 @@ import {
 import {
   VideoProviderUnavailableError,
   type AsyncVideoGenerationProvider,
+  type VideoGenerationParams,
   type VideoGenerationProvider,
 } from "./providers";
 import { InsufficientCreditsError } from "@/lib/credits";
@@ -31,7 +32,13 @@ interface SeedScene {
     id: string;
     projectId: string;
     name: string;
-    project: { id: string; name: string; teamId: string; createdBy: string };
+    project: {
+      id: string;
+      name: string;
+      teamId: string;
+      createdBy: string;
+      brandDna?: unknown;
+    };
   };
 }
 
@@ -226,6 +233,105 @@ describe("createVideoGenerationJob", () => {
         data: expect.objectContaining({ status: "generating" }),
       }),
     );
+  });
+
+  it("applies the project's Brand DNA to the render prompts when assigned", async () => {
+    db.scene.findFirst.mockResolvedValueOnce({
+      id: "scene-1",
+      storyboardId: "sb-1",
+      orderIndex: 0,
+      duration: 4,
+      prompt: "A bold product close-up",
+      negativePrompt: null,
+      aspectRatio: "9:16",
+      storyboard: {
+        id: "sb-1",
+        projectId: "project-1",
+        name: "Summer launch",
+        project: {
+          id: "project-1",
+          name: "Acme",
+          teamId: "team-1",
+          createdBy: "user-1",
+          brandDna: {
+            id: "bd-1",
+            name: "Acme Organic",
+            visualIdentity: {
+              colors: {
+                primary: ["#0B3C2D"],
+                secondary: [],
+                forbidden: ["#FF0000"],
+              },
+              typography: {
+                headingFont: "Bebas Neue",
+                bodyFont: "Inter",
+                minSizePx: 18,
+              },
+              logo: {
+                variants: [],
+                placementRules: "top_left",
+                minSizePercent: 12,
+              },
+            },
+            voiceTone: {
+              voice: {
+                adjectives: ["energetic"],
+                forbiddenWords: ["cheap"],
+                sentenceStructure: "short_punchy",
+              },
+              characters: {},
+            },
+            complianceRules: {
+              compliance: {
+                requiredDisclaimers: [],
+                industry: "health",
+                regionalRules: {},
+              },
+            },
+            createdAt: new Date("2026-01-01"),
+            updatedAt: new Date("2026-01-02"),
+          },
+        },
+      },
+    });
+
+    const generateMock = vi.fn<VideoGenerationProvider["generate"]>(async () => ({
+      provider: "mock-branded",
+      providerJobId: "branded-1",
+      width: 720,
+      height: 1280,
+      duration: 4,
+      files: [
+        {
+          filename: "clip.svg",
+          contentType: "image/svg+xml",
+          body: Buffer.from("<svg/>"),
+        },
+      ],
+      metadata: {},
+    }));
+    const capturingProvider = {
+      name: "mock-branded",
+      generate: generateMock,
+    };
+
+    await createVideoGenerationJob({
+      ...opts,
+      provider: capturingProvider,
+    });
+
+    const captured = generateMock.mock.calls[0]?.[0] as VideoGenerationParams;
+    expect(captured.prompt).toContain("Brand style:");
+    expect(captured.prompt).toContain("brand colors #0B3C2D");
+    expect(captured.prompt).toContain("heading font Bebas Neue");
+    expect(captured.negativePrompt).toContain("avoid colors #FF0000");
+    expect(captured.negativePrompt).toContain('avoid words "cheap"');
+
+    // The audit trail stored on the job reflects the enriched render request.
+    const createCall = db.generationJob.create.mock
+      .calls[0]?.[0] as { data: { inputParams: Record<string, unknown> } };
+    expect(createCall.data.inputParams.prompt).toContain("Brand style:");
+    expect(createCall.data.inputParams.negativePrompt).toContain("#FF0000");
   });
 
   it("rejects the job up front when credits are insufficient", async () => {

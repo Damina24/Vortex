@@ -285,6 +285,17 @@ An optional **real** video provider backed by the Kling AI text-to-video API.
 - The provider is wired through the exact same submit → poll → complete flow as
   `mock-async` (documented above), so no pipeline changes were required —
   clients already poll `GET /api/v1/generation-jobs/[id]`.
+- **Brand DNA auto-enforcement** - when a project has a brand profile
+  assigned, video generation honors it end-to-end. `enrichScenePrompts`
+  (`src/lib/brand-dna.ts`) appends the profile's visual style guide (brand
+  colors, accent colors, heading/body fonts, logo placement and minimum size)
+  to the render prompt and moves forbidden colors/words into the negative
+  prompt - applied both in `createVideoGenerationJob` and when the async
+  completion path (`completeVideoGenerationJob`) polls a provider. The
+  enriched prompts are stored in the job's `inputParams`, so the audit trail
+  matches what the provider actually rendered. The storyboard/scenes pages
+  show the active profile as a "Brand DNA" chip, and the new-storyboard page
+  surfaces whether a profile will apply to the project.
 
 
 ### Audio generation (voiceover / music)

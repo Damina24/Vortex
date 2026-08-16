@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Plus, Palette } from "lucide-react";
 import toast from "react-hot-toast";
 import axios from "axios";
 
@@ -12,10 +12,33 @@ export default function NewStoryboardPage() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
   const [isLoading, setIsLoading] = useState(false);
+  // undefined = still loading; null = the project has no profile assigned.
+  const [brandName, setBrandName] = useState<string | null | undefined>(
+    undefined,
+  );
   const [formData, setFormData] = useState({
     name: "",
     projectId,
   });
+
+  useEffect(() => {
+    if (!projectId) {
+      setBrandName(null);
+      return;
+    }
+    let cancelled = false;
+    axios
+      .get(`/api/v1/projects/${projectId}`)
+      .then((res) => {
+        if (!cancelled) setBrandName(res.data.data?.brandDna?.name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setBrandName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -100,6 +123,30 @@ export default function NewStoryboardPage() {
             <p className="text-xs text-muted-foreground">
               Provide the project UUID this storyboard belongs to.
             </p>
+          </div>
+        )}
+
+        {projectId && (
+          <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+            {brandName === undefined ? (
+              <span className="text-muted-foreground">
+                Loading brand profile…
+              </span>
+            ) : brandName ? (
+              <span className="flex items-center gap-2">
+                <Palette className="h-4 w-4 text-vortex-600" />
+                <span>
+                  Active Brand DNA: <strong>{brandName}</strong> — scene prompts
+                  and video renders will automatically follow these brand
+                  guidelines.
+                </span>
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                No Brand DNA profile is assigned to this project — AI generation
+                will use default guidelines.
+              </span>
+            )}
           </div>
         )}
 
