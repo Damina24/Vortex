@@ -357,3 +357,101 @@ export async function loadBrandContextForProject(
 
   return composeBrandContext(row, manual);
 }
+
+// ============================================================
+// Visual brand enrichment (video / image generation prompts)
+// ============================================================
+
+const HEX_COLOR_PATTERN = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+function cleanList(items: string[]): string[] {
+  return items.map((item) => item.trim()).filter(Boolean);
+}
+
+/**
+ * Builds a compact visual-style suffix describing a brand's look so rendered
+ * scenes match the brand guidelines. Only concrete visual rules are included;
+ * empty profiles yield `null` so the render prompt stays untouched.
+ */
+export function buildBrandVisualPromptSuffix(
+  payload: BrandDnaPayload
+): string | null {
+  const parts: string[] = [];
+
+  const hexColors = cleanList(payload.colors.primary).filter((c) =>
+    HEX_COLOR_PATTERN.test(c)
+  );
+  if (hexColors.length > 0) {
+    parts.push(`brand colors ${hexColors.join(", ")}`);
+  }
+
+  const accents = cleanList(payload.colors.secondary);
+  if (accents.length > 0) {
+    parts.push(`accent colors ${accents.join(", ")}`);
+  }
+
+  if (payload.typography.headingFont.trim()) {
+    parts.push(`heading font ${payload.typography.headingFont.trim()}`);
+  }
+  if (payload.typography.bodyFont.trim()) {
+    parts.push(`body font ${payload.typography.bodyFont.trim()}`);
+  }
+  if (payload.logo.placementRules.trim()) {
+    parts.push(`logo placement ${payload.logo.placementRules.trim()}`);
+  }
+  if (payload.logo.minSizePercent > 0) {
+    parts.push(`logo minimum size ${payload.logo.minSizePercent}% of frame`);
+  }
+
+  return parts.length > 0 ? `Brand style: ${parts.join("; ")}.` : null;
+}
+
+/**
+ * Builds a negative-prompt suffix listing forbidden brand elements so renders
+ * avoid them. Returns `null` when the profile forbids nothing.
+ */
+export function buildBrandNegativePromptSuffix(
+  payload: BrandDnaPayload
+): string | null {
+  const parts: string[] = [];
+
+  const forbiddenColors = cleanList(payload.colors.forbidden);
+  if (forbiddenColors.length > 0) {
+    parts.push(`avoid colors ${forbiddenColors.join(", ")}`);
+  }
+
+  const forbiddenWords = cleanList(payload.voice.forbiddenWords);
+  if (forbiddenWords.length > 0) {
+    parts.push(`avoid words "${forbiddenWords.join('", "')}"`);
+  }
+
+  return parts.length > 0 ? parts.join("; ") : null;
+}
+
+/**
+ * Enriches a scene's render prompts with the project's brand visual identity.
+ * The scene's stored prompt is never mutated — only the provider request gains
+ * the brand suffix. Returns the inputs unchanged when no brand is assigned.
+ */
+export function enrichScenePrompts(input: {
+  prompt: string;
+  negativePrompt: string | null;
+  brand: BrandDnaRow | null | undefined;
+}): { prompt: string; negativePrompt: string | null } {
+  if (!input.brand) {
+    return { prompt: input.prompt, negativePrompt: input.negativePrompt };
+  }
+
+  const payload = brandDnaToPayload(input.brand);
+  const styleSuffix = buildBrandVisualPromptSuffix(payload);
+  const negativeSuffix = buildBrandNegativePromptSuffix(payload);
+
+  return {
+    prompt: styleSuffix
+      ? `${input.prompt.trim()}\n\n${styleSuffix}`
+      : input.prompt,
+    negativePrompt: negativeSuffix
+      ? `${input.negativePrompt?.trim() ?? ""} ${negativeSuffix}`.trim()
+      : input.negativePrompt,
+  };
+}

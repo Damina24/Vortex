@@ -102,11 +102,11 @@ describe("getVideoProvider", () => {
   });
 
   it("throws VideoProviderUnavailableError for unregistered providers", () => {
-    expect(() => getVideoProvider("kling")).toThrowError(
+    expect(() => getVideoProvider("runway")).toThrowError(
       VideoProviderUnavailableError,
     );
-    expect(() => getVideoProvider("kling")).toThrowError(
-      /provider "kling" is not available/,
+    expect(() => getVideoProvider("runway")).toThrowError(
+      /provider "runway" is not available/,
     );
   });
 

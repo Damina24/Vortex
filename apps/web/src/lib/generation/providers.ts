@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, createHmac } from "crypto";
 
 /**
  * Video generation provider abstraction. Mirrors the AI service's
@@ -340,3 +340,280 @@ export class MockAsyncVideoProvider implements AsyncVideoGenerationProvider {
 // Register the async mock provider. `mock` remains the default; `mock-async`
 // demonstrates (and tests) the full submit → poll → complete flow.
 PROVIDER_REGISTRY["mock-async"] = () => new MockAsyncVideoProvider();
+// ============================================================
+// Kling AI — real text-to-video provider
+// ============================================================
+// Production-ready provider backed by the Kling AI API (api.klingai.com).
+// Kling renders asynchronously, so this implements the two-phase
+// `AsyncVideoGenerationProvider` capability: `submit()` creates a task and
+// returns its id, then `retrieve()` is polled until the render finishes, at
+// which point the finished MP4 is downloaded and wrapped in a
+// `GenerationResult`. Select it with `VIDEO_PROVIDER=kling` and set
+// `KLING_API_KEY` + `KLING_API_SECRET`. All network access is injected via
+// `fetchImpl` so the provider is unit-testable without a real key.
+
+export interface KlingVideoProviderConfig {
+  apiKey?: string;
+  apiSecret?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  /** Injectable clock (seconds) so the auth signature is deterministic in tests. */
+  timestampProvider?: () => number;
+  modelName?: string;
+  mode?: "std" | "pro";
+}
+
+const KLING_DEFAULT_BASE_URL = "https://api.klingai.com";
+
+/** Kling only renders 5s or 10s clips; round any requested duration. */
+export function pickKlingDuration(seconds: number): string {
+  return seconds <= 7.5 ? "5" : "10";
+}
+
+/** Derive typical output dimensions from an aspect ratio (Kling may omit them). */
+export function klingAspectDimensions(aspectRatio: string): {
+  width: number;
+  height: number;
+} {
+  switch (aspectRatio) {
+    case "9:16":
+      return { width: 1080, height: 1920 };
+    case "1:1":
+      return { width: 1080, height: 1080 };
+    default:
+      return { width: 1280, height: 720 };
+  }
+}
+
+/**
+ * Builds the Kling authentication headers. The signature is the hex
+ * HMAC-SHA256 (keyed by the API secret) over the stringified Unix timestamp in
+ * seconds — Kling's documented access-key/secret scheme. Injected via
+ * `timestampProvider` in tests so the output is deterministic.
+ */
+export function buildKlingAuthHeaders(input: {
+  apiKey: string;
+  apiSecret: string;
+  timestamp: number;
+  expectJsonBody?: boolean;
+}): Record<string, string> {
+  const ts = String(input.timestamp);
+  const signature = createHmac("sha256", input.apiSecret)
+    .update(ts)
+    .digest("hex");
+  const headers: Record<string, string> = {
+    "Api-Key": input.apiKey,
+    "Api-Secret": input.apiSecret,
+    Timestamp: ts,
+    Signature: signature,
+    Accept: "application/json",
+  };
+  if (input.expectJsonBody) {
+    headers["Content-Type"] = "application/json";
+  }
+  return headers;
+}
+
+/**
+ * Parses a Kling API JSON envelope, throwing on a non-zero `code`.
+ */
+function klingJson(body: unknown): Record<string, unknown> {
+  const obj =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const code = obj.code as number | undefined;
+  if (typeof code === "number" && code !== 0) {
+    throw new Error(
+      `Kling API error (${code}): ${String(obj.message ?? "unknown error")}`,
+    );
+  }
+  return (obj.data as Record<string, unknown>) ?? {};
+}
+
+interface KlingVideoRef {
+  url?: string;
+  id?: string;
+  width?: number;
+  height?: number;
+}
+
+export class KlingVideoProvider implements AsyncVideoGenerationProvider {
+  readonly name = "kling";
+
+  private readonly fetchImpl: typeof fetch;
+  private readonly apiKey: string;
+  private readonly apiSecret: string;
+  private readonly baseUrl: string;
+  private readonly timestamp: () => number;
+  private readonly modelName: string;
+  private readonly mode: "std" | "pro";
+
+  constructor(config: KlingVideoProviderConfig = {}) {
+    this.apiKey = config.apiKey ?? process.env.KLING_API_KEY ?? "";
+    this.apiSecret = config.apiSecret ?? process.env.KLING_API_SECRET ?? "";
+    this.fetchImpl = config.fetchImpl ?? globalThis.fetch;
+    this.baseUrl = (config.baseUrl ?? KLING_DEFAULT_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+    this.timestamp =
+      config.timestampProvider ?? (() => Math.floor(Date.now() / 1000));
+    this.modelName = config.modelName ?? process.env.KLING_MODEL ?? "kling-v1";
+    this.mode = config.mode ?? "std";
+  }
+
+  /** Async providers use `submit` + `retrieve`; `generate` is not used. */
+  async generate(_params: VideoGenerationParams): Promise<GenerationResult> {
+    throw new Error(
+      "KlingVideoProvider is two-phase: use submit() then retrieve()",
+    );
+  }
+
+  async submit(params: VideoGenerationParams): Promise<VideoSubmitResult> {
+    this.assertConfigured();
+    const body = JSON.stringify({
+      model_name: this.modelName,
+      prompt: params.prompt,
+      negative_prompt: params.negativePrompt ?? "",
+      cfg_scale: 0.5,
+      mode: this.mode,
+      aspect_ratio: params.aspectRatio,
+      duration: pickKlingDuration(params.duration),
+    });
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/videos/text2video`,
+      {
+        method: "POST",
+        headers: buildKlingAuthHeaders({
+          apiKey: this.apiKey,
+          apiSecret: this.apiSecret,
+          timestamp: this.timestamp(),
+          expectJsonBody: true,
+        }),
+        body,
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Kling submit failed with status ${response.status}`);
+    }
+    const data = klingJson(await response.json());
+    const taskId = data.task_id;
+    if (typeof taskId !== "string" || !taskId) {
+      throw new Error("Kling submit returned no task id");
+    }
+    return { providerJobId: taskId };
+  }
+
+  async retrieve(
+    providerJobId: string,
+    params: VideoGenerationParams,
+  ): Promise<VideoRetrieveResult> {
+    this.assertConfigured();
+    const id = encodeURIComponent(providerJobId);
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/videos/text2video/${id}`,
+      {
+        method: "GET",
+        headers: buildKlingAuthHeaders({
+          apiKey: this.apiKey,
+          apiSecret: this.apiSecret,
+          timestamp: this.timestamp(),
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Kling retrieve failed with status ${response.status}`);
+    }
+    const data = klingJson(await response.json());
+    const status = data.task_status;
+
+    if (status === "submitted" || status === "processing") {
+      return { status: "processing" };
+    }
+
+    if (status === "failed") {
+      return {
+        status: "failed",
+        error: String(data.task_status_msg ?? "Kling generation failed"),
+      };
+    }
+
+    if (status === "succeed") {
+      const video = this.firstVideo(data.task_result);
+      if (!video?.url) {
+        throw new Error("Kling succeeded but returned no video URL");
+      }
+      const file = await this.downloadVideo(video.url);
+      const dims = klingAspectDimensions(params.aspectRatio);
+      return {
+        status: "succeeded",
+        result: {
+          provider: this.name,
+          providerJobId,
+          width: video.width ?? dims.width,
+          height: video.height ?? dims.height,
+          duration: params.duration,
+          files: [
+            {
+              filename: `kling-${providerJobId.slice(0, 12)}.mp4`,
+              contentType: file.contentType,
+              body: file.body,
+            },
+          ],
+          metadata: {
+            provider: "kling",
+            model: this.modelName,
+            mode: this.mode,
+            taskId: providerJobId,
+            videoId: video.id ?? null,
+          },
+        },
+      };
+    }
+
+    throw new Error(`Kling returned unknown task_status: ${String(status)}`);
+  }
+
+  private assertConfigured(): void {
+    if (!this.apiKey || !this.apiSecret) {
+      throw new Error(
+        "KLING_API_KEY and KLING_API_SECRET are required when VIDEO_PROVIDER=kling",
+      );
+    }
+  }
+
+  private firstVideo(result: unknown): KlingVideoRef | undefined {
+    if (!result || typeof result !== "object") {
+      return undefined;
+    }
+    const videos = (result as { videos?: unknown }).videos;
+    if (!Array.isArray(videos) || videos.length === 0) {
+      return undefined;
+    }
+    const v = videos[0] as Record<string, unknown>;
+    return {
+      url: typeof v.url === "string" ? v.url : undefined,
+      id: typeof v.id === "string" ? v.id : undefined,
+      width: typeof v.width === "number" ? v.width : undefined,
+      height: typeof v.height === "number" ? v.height : undefined,
+    };
+  }
+
+  private async downloadVideo(
+    url: string,
+  ): Promise<{ body: Buffer; contentType: string }> {
+    const res = await this.fetchImpl(url, { method: "GET" });
+    if (!res.ok) {
+      throw new Error(`Kling video download failed with status ${res.status}`);
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      body: Buffer.from(arrayBuffer),
+      contentType: res.headers.get("content-type") ?? "video/mp4",
+    };
+  }
+}
+
+// Register the real provider. `mock` remains the default; set VIDEO_PROVIDER=kling
+// (with KLING_API_KEY + KLING_API_SECRET) to render real videos end-to-end.
+PROVIDER_REGISTRY.kling = () => new KlingVideoProvider();
+
