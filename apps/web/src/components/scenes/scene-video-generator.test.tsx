@@ -145,7 +145,7 @@ describe("SceneVideoGenerator", () => {
       expect(screen.getByRole("combobox")).toHaveValue("ffmpeg");
     });
 
-    it("renders the completed-render preview with a re-render action", () => {
+    it("renders an inline player for completed real video renders", () => {
       render(
         <SceneVideoGenerator
           {...baseProps}
@@ -153,6 +153,7 @@ describe("SceneVideoGenerator", () => {
           generatedVideo={{
             id: "asset-1",
             url: "https://cdn.example/video.mp4",
+            thumbnailUrl: "https://cdn.example/video.poster.jpg",
             name: "Scene 1 render",
             mimeType: "video/mp4",
           }}
@@ -160,10 +161,43 @@ describe("SceneVideoGenerator", () => {
       );
 
       expect(screen.getByText("Rendered")).toBeInTheDocument();
-      expect(
-        screen.getByRole("img", { name: "Scene 1 render preview" }),
-      ).toHaveAttribute("src", "https://cdn.example/video.mp4");
+      // jsdom/testing-library don't expose the implicit "video" ARIA role,
+      // so query the media element directly.
+      const player = document.querySelector("video");
+      expect(player).toHaveAttribute("src", "https://cdn.example/video.mp4");
+      expect(player).toHaveAttribute(
+        "poster",
+        "https://cdn.example/video.poster.jpg",
+      );
+      expect(player).toHaveAttribute("controls");
+      // No poster `<img>` is rendered for real video.
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: /re-render/i })).toBeInTheDocument();
+    });
+
+    it("keeps the poster thumbnail for non-video mock renders", () => {
+      render(
+        <SceneVideoGenerator
+          {...baseProps}
+          status="completed"
+          generatedVideo={{
+            id: "asset-2",
+            url: "https://cdn.example/poster.svg",
+            thumbnailUrl: "https://cdn.example/poster.svg",
+            name: "Scene 2 render",
+            mimeType: "image/svg+xml",
+          }}
+        />,
+      );
+
+      const thumb = screen.getByRole("img", { name: "Scene 2 render preview" });
+      expect(thumb).toHaveAttribute("src", "https://cdn.example/poster.svg");
+      expect(thumb.closest("a")).toHaveAttribute(
+        "href",
+        "https://cdn.example/poster.svg",
+      );
+      // No video player for image-only renders.
+      expect(document.querySelector("video")).not.toBeInTheDocument();
     });
 
     it("renders the generating placeholder while a render is in flight", () => {

@@ -156,47 +156,63 @@ export function SceneVideoGenerator({
   }
 
   if (generatedVideo) {
+    // Real render providers (ffmpeg, kling) produce actual MP4s → playable
+    // preview. Mock renders are SVG "poster" images → keep the thumbnail.
+    const isVideo = generatedVideo.mimeType?.startsWith("video/") === true;
+
     return (
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background/50 p-3">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="mt-4 rounded-lg border bg-background/50 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              Rendered
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              Render preview — {generatedVideo.name}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={isRendering}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:border-vortex-500/50 hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${isRendering ? "animate-spin" : ""}`}
+            />
+            Re-render
+          </button>
+        </div>
+
+        {isVideo ? (
+          <video
+            src={generatedVideo.url}
+            poster={generatedVideo.thumbnailUrl ?? undefined}
+            controls
+            playsInline
+            preload="metadata"
+            className="mt-3 aspect-video w-full max-w-lg rounded-lg border bg-black/60 dark:bg-black/80"
+          />
+        ) : (
           <a
             href={generatedVideo.url}
             target="_blank"
             rel="noreferrer"
-            className="group flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/40"
+            className="group mt-3 flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/40"
             title="Open render preview"
           >
             {/* eslint-disable-next-line @next/next/no-img-element -- The
-                thumbnail may be an SVG poster, a remote video URL, or an inline
-                data URI (S3 fallback); next/image can't reliably optimize
-                those, so keep the plain <img> for this small preview. */}
+                thumbnail may be an SVG poster or an inline data URI (S3
+                fallback); next/image can't reliably optimize those, so keep
+                the plain <img> for this small preview. */}
             <img
               src={generatedVideo.thumbnailUrl ?? generatedVideo.url}
               alt={`${generatedVideo.name} preview`}
               className="h-full w-full object-cover transition-transform group-hover:scale-105"
             />
           </a>
-          <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">
-              <CheckCircle2 className="h-4 w-4" />
-              Rendered
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              Mock render preview — {generatedVideo.name}
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={isRendering}
-          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:border-vortex-500/50 hover:text-foreground disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${isRendering ? "animate-spin" : ""}`}
-          />
-          Re-render
-        </button>
+        )}
       </div>
     );
   }
