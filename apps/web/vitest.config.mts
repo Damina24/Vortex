@@ -1,18 +1,20 @@
 import path from "path";
 import { fileURLToPath } from "url";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 /**
- * Unit-test config for the Next.js app. Only pure-logic modules are tested
- * here (billing packages, credit ledger, generation pipeline), so a plain
- * Node environment is sufficient — no jsdom / React DOM needed.
+ * Unit-test config for the Next.js app. Pure-logic modules run in a plain
+ * Node environment; React component tests opt into jsdom via a per-file
+ * `// @vitest-environment jsdom` docblock.
  */
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  plugins: [react()],
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
   resolve: {
     alias: {
