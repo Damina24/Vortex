@@ -13,6 +13,7 @@ import {
   Palette,
   Users,
   Send,
+  Music,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -60,6 +61,11 @@ const sidebarItems = [
     label: "Publishing",
     href: "/dashboard/publishing",
     icon: Send,
+  },
+  {
+    label: "Audio",
+    href: "/dashboard/audio",
+    icon: Music,
   },
   {
     label: "Team",
@@ -112,6 +118,7 @@ export function DashboardSidebar({ creditsBalance }: DashboardSidebarProps) {
             collapsed && "justify-center w-full"
           )}
         >
+          {/* eslint-disable-next-line @next/next/no-img-element -- Small public static SVG logo; next/image would need a static import or domain config for a 32px mark. */}
           <img src="/vortex-logo.svg" alt="VORTEX AI" className="h-8 w-8 shrink-0" />
           <AnimatePresence>
             {!collapsed && (
