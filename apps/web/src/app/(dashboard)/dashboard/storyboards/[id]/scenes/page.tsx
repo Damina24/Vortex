@@ -114,6 +114,7 @@ export default async function StoryboardScenesPage({
                 status={scene.status}
                 generatedVideo={scene.generatedVideo}
                 creditCost={AI_CREDIT_COSTS.videoGeneration}
+                defaultProvider={process.env.VIDEO_PROVIDER ?? "mock"}
               />
 
               <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">

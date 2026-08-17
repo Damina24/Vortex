@@ -11,6 +11,12 @@ import { VideoProviderUnavailableError } from "@/lib/generation/providers";
 
 const createJobSchema = z.object({
   sceneId: z.string().uuid(),
+  /**
+   * Optional render provider name (e.g. `mock`, `mock-async`, `ffmpeg`, `kling`).
+   * Defaults to the configured `VIDEO_PROVIDER` (mock) when omitted, so existing
+   * clients are unaffected.
+   */
+  provider: z.string().min(1).optional(),
 });
 
 /**
@@ -46,6 +52,7 @@ export async function POST(req: Request) {
       await createVideoGenerationJob({
         userId: session.user.id,
         sceneId: validation.data.sceneId,
+        provider: validation.data.provider,
       });
 
     return NextResponse.json(

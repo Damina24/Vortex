@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import toast from "react-hot-toast";
@@ -22,32 +22,77 @@ export interface GeneratedVideoRef {
  * refreshes the server component list so the new asset and status appear.
  * Insufficient-credit responses (402) surface the inline buy-credits alert.
  */
+const VIDEO_PROVIDERS = [
+  { value: "mock", label: "Mock (fast, offline)" },
+  { value: "mock-async", label: "Mock async (poll flow)" },
+  { value: "ffmpeg", label: "FFmpeg (local MP4)" },
+  { value: "kling", label: "Kling AI" },
+] as const;
+
 export function SceneVideoGenerator({
   sceneId,
   status,
   generatedVideo,
   creditCost,
+  defaultProvider = "mock",
 }: {
   sceneId: string;
   status: "pending" | "generating" | "completed" | "failed";
   generatedVideo: GeneratedVideoRef | null;
   creditCost: number;
+  /** Render provider to use. Defaults to `mock`; pass e.g. `"ffmpeg"` to
+   * render a real local MP4 (requires VIDEO_PROVIDER=ffmpeg + ffmpeg installed)
+   * or `"mock-async"`/`"kling"` to exercise the two-phase submit/poll flow. */
+  defaultProvider?: string;
 }) {
   const router = useRouter();
   const [isRendering, setIsRendering] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [insufficientMessage, setInsufficientMessage] = useState<string | null>(
     null,
   );
+  const [provider, setProvider] = useState<string>(
+    defaultProvider ?? "mock",
+  );
+  const cancelledRef = useRef(false);
+
+  useEffect(() => () => {
+    cancelledRef.current = true;
+  }, []);
+
+  // Async polling cadence for two-phase providers (kling / ffmpeg / mock-async).
+  const POLL_INTERVAL_MS = 1500;
+  const MAX_ATTEMPTS = 90; // ~2 minutes at 1.5s intervals
 
   async function handleGenerate() {
     setIsRendering(true);
+    setProgress(null);
     setInsufficientMessage(null);
 
     try {
-      await axios.post("/api/v1/generation-jobs", { sceneId });
-      toast.success("Video rendered");
-      notifyCreditsUpdated();
-      router.refresh();
+      const res = await axios.post("/api/v1/generation-jobs", {
+        sceneId,
+        provider,
+      });
+      const job = res.data?.data as {
+        jobId?: string;
+        status?: string;
+        errorMessage?: string | null;
+      };
+
+      // Synchronous providers (e.g. mock) complete on submit — just refresh.
+      if (!job || job.status === "completed") {
+        toast.success("Video rendered");
+        notifyCreditsUpdated();
+        void router.refresh();
+        return;
+      }
+
+      // Async provider: poll until the job reaches a terminal state.
+      if (!job.jobId) {
+        throw new Error("Render started but no job id was returned");
+      }
+      await pollJob(job.jobId);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 402) {
         setInsufficientMessage(
@@ -61,8 +106,50 @@ export function SceneVideoGenerator({
       }
     } finally {
       setIsRendering(false);
+      setProgress(null);
     }
   }
+
+  async function pollJob(jobId: string) {
+    let attempts = 0;
+    while (!cancelledRef.current && attempts < MAX_ATTEMPTS) {
+      attempts += 1;
+      // eslint-disable-next-line no-await-in-loop
+      const res = await axios.get(`/api/v1/generation-jobs/${jobId}`);
+      const job = res.data?.data as {
+        status?: string;
+        errorMessage?: string | null;
+      };
+
+      if (!job) {
+        break;
+      }
+
+      if (job.status === "completed") {
+        toast.success("Video rendered");
+        notifyCreditsUpdated();
+        void router.refresh();
+        return;
+      }
+
+      if (job.status === "failed") {
+        toast.error(job.errorMessage || "Render failed");
+        void router.refresh();
+        return;
+      }
+
+      // Still processing — nudge the inline progress bar and wait.
+      setProgress(Math.min(95, Math.round((attempts / MAX_ATTEMPTS) * 100)));
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+
+    if (!cancelledRef.current) {
+      toast("Render is still processing — check back in a moment.");
+    }
+    void router.refresh();
+  }
+
 
   if (insufficientMessage) {
     return <InsufficientCreditsAlert message={insufficientMessage} />;
@@ -79,6 +166,10 @@ export function SceneVideoGenerator({
             className="group flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/40"
             title="Open render preview"
           >
+            {/* eslint-disable-next-line @next/next/no-img-element -- The
+                thumbnail may be an SVG poster, a remote video URL, or an inline
+                data URI (S3 fallback); next/image can't reliably optimize
+                those, so keep the plain <img> for this small preview. */}
             <img
               src={generatedVideo.thumbnailUrl ?? generatedVideo.url}
               alt={`${generatedVideo.name} preview`}
@@ -140,16 +231,39 @@ export function SceneVideoGenerator({
   }
 
   return (
-    <div className="mt-4">
-      <button
-        type="button"
-        onClick={handleGenerate}
-        disabled={isRendering}
-        className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-vortex-700 disabled:opacity-50 transition-colors"
-      >
-        <Clapperboard className="h-4 w-4" />
-        {isRendering ? "Rendering…" : `Generate Video · ${creditCost} credits`}
-      </button>
+    <div className="mt-4 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <select
+          value={provider}
+          onChange={(e) => setProvider(e.target.value)}
+          disabled={isRendering}
+          className="text-xs"
+          title="Render provider"
+        >
+          {VIDEO_PROVIDERS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={isRendering}
+          className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-vortex-700 disabled:opacity-50 transition-colors"
+        >
+          <Clapperboard className="h-4 w-4" />
+          {isRendering ? "Rendering…" : `Generate Video · ${creditCost} credits`}
+        </button>
+      </div>
+      {progress !== null && (
+        <div className="h-1.5 w-full max-w-48 overflow-hidden rounded bg-muted">
+          <div
+            className="h-full w-full bg-vortex-500 transition-all duration-300"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
