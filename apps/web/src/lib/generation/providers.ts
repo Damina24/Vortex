@@ -901,3 +901,239 @@ export class KlingVideoProvider implements AsyncVideoGenerationProvider {
 // (with KLING_API_KEY + KLING_API_SECRET) to render real videos end-to-end.
 PROVIDER_REGISTRY.kling = () => new KlingVideoProvider();
 
+// ============================================================
+// Runway — text-to-video API provider (async two-phase)
+// ============================================================
+// Production-ready provider backed by the Runway text-to-video API
+// (api.dev.runwayml.com). Runway renders asynchronously, so this implements
+// the two-phase `AsyncVideoGenerationProvider` capability: `submit()` creates
+// a text-to-video task and returns its id, then `retrieve()` is polled until
+// the render finishes, at which point the finished MP4 is downloaded and
+// wrapped in a `GenerationResult`. Select it with `VIDEO_PROVIDER=runway` and
+// set `RUNWAY_API_KEY`. All network access is injected via `fetchImpl` so the
+// provider is unit-testable without a real key.
+//
+// NOTE: modeled on Runway's public API contract (developers.runwayml.com) —
+// `POST /v1/text_to_video`, `GET /v1/text_to_video/{id}`, Bearer auth, and
+// PENDING/RUNNING/SUCCEEDED/FAILED/THROTTLED task statuses. Verify the exact
+// request/response shape against your account before going to production.
+
+export interface RunwayVideoProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  model?: string;
+}
+
+const RUNWAY_DEFAULT_BASE_URL = "https://api.dev.runwayml.com/v1";
+
+/** Runway (gen3a_turbo) renders 5s or 10s clips; round any requested duration. */
+export function pickRunwayDuration(seconds: number): string {
+  return seconds <= 7.5 ? "5" : "10";
+}
+
+/** Map our "W:H" aspect ratio to Runway's "WIDTH:HEIGHT" ratio strings. */
+export function runwayRatio(aspectRatio: string): string {
+  switch (aspectRatio) {
+    case "9:16":
+      return "768:1280";
+    case "1:1":
+      return "768:768";
+    default:
+      return "1280:768"; // 16:9
+  }
+}
+
+/** Derive typical output dimensions from an aspect ratio (Runway may omit them). */
+export function runwayAspectDimensions(aspectRatio: string): {
+  width: number;
+  height: number;
+} {
+  switch (aspectRatio) {
+    case "9:16":
+      return { width: 768, height: 1280 };
+    case "1:1":
+      return { width: 768, height: 768 };
+    default:
+      return { width: 1280, height: 768 };
+  }
+}
+
+/** Parses a Runway API JSON body into a plain record. */
+function runwayJson(body: unknown): Record<string, unknown> {
+  return body && typeof body === "object"
+    ? (body as Record<string, unknown>)
+    : {};
+}
+
+export class RunwayVideoProvider implements AsyncVideoGenerationProvider {
+  readonly name = "runway";
+
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly model: string;
+
+  constructor(config: RunwayVideoProviderConfig = {}) {
+    this.apiKey = config.apiKey ?? process.env.RUNWAY_API_KEY ?? "";
+    this.baseUrl = (config.baseUrl ?? RUNWAY_DEFAULT_BASE_URL).replace(/\/+$/, "");
+    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.model = config.model ?? process.env.RUNWAY_VIDEO_MODEL ?? "gen3a_turbo";
+  }
+
+  async generate(_params: VideoGenerationParams): Promise<GenerationResult> {
+    throw new Error(
+      "RunwayVideoProvider is two-phase: use submit() then retrieve()",
+    );
+  }
+
+  async submit(params: VideoGenerationParams): Promise<VideoSubmitResult> {
+    this.assertConfigured();
+
+    const response = await this.fetchImpl(`${this.baseUrl}/text_to_video`, {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: JSON.stringify({
+        model: this.model,
+        prompt: params.prompt,
+        ratio: runwayRatio(params.aspectRatio),
+        duration: pickRunwayDuration(params.duration),
+        watermark: false,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Runway submit failed with status ${response.status}`);
+    }
+    const data = runwayJson(await response.json());
+    const taskId = data.id;
+    if (typeof taskId !== "string" || !taskId) {
+      throw new Error("Runway submit returned no task id");
+    }
+    const status = data.status;
+    if (status === "FAILED" || status === "CANCELLED") {
+      throw new Error(
+        `Runway task failed immediately: ${String(data.error ?? status)}`,
+      );
+    }
+    return { providerJobId: taskId };
+  }
+
+  async retrieve(
+    providerJobId: string,
+    params: VideoGenerationParams,
+  ): Promise<VideoRetrieveResult> {
+    this.assertConfigured();
+    const id = encodeURIComponent(providerJobId);
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/text_to_video/${id}`,
+      {
+        method: "GET",
+        headers: this.authHeaders(),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Runway retrieve failed with status ${response.status}`);
+    }
+    const data = runwayJson(await response.json());
+    const status = data.status;
+
+    if (
+      status === "PENDING" ||
+      status === "RUNNING" ||
+      status === "THROTTLED"
+    ) {
+      return {
+        status: "processing",
+        progress:
+          typeof data.progress === "number" ? data.progress : undefined,
+      };
+    }
+
+    if (status === "FAILED" || status === "CANCELLED") {
+      return {
+        status: "failed",
+        error: String(data.error ?? "Runway generation failed"),
+      };
+    }
+
+    if (status === "SUCCEEDED") {
+      const url = this.firstOutputUrl(data.output);
+      if (!url) {
+        throw new Error("Runway succeeded but returned no video URL");
+      }
+      const file = await this.downloadVideo(url);
+      const dims = runwayAspectDimensions(params.aspectRatio);
+      return {
+        status: "succeeded",
+        result: {
+          provider: this.name,
+          providerJobId,
+          width: dims.width,
+          height: dims.height,
+          duration: params.duration,
+          files: [
+            {
+              filename: `runway-${providerJobId.slice(0, 12)}.mp4`,
+              contentType: file.contentType,
+              body: file.body,
+            },
+          ],
+          metadata: {
+            provider: "runway",
+            model: this.model,
+            taskId: providerJobId,
+          },
+        },
+      };
+    }
+
+    throw new Error(`Runway returned unknown status: ${String(status)}`);
+  }
+
+  private authHeaders(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  private assertConfigured(): void {
+    if (!this.apiKey) {
+      throw new Error(
+        "RUNWAY_API_KEY is required when VIDEO_PROVIDER=runway",
+      );
+    }
+  }
+
+  private firstOutputUrl(output: unknown): string | undefined {
+    if (Array.isArray(output)) {
+      const url = output.find((item) => typeof item === "string");
+      return typeof url === "string" && url ? url : undefined;
+    }
+    if (typeof output === "string" && output) {
+      return output;
+    }
+    return undefined;
+  }
+
+  private async downloadVideo(
+    url: string,
+  ): Promise<{ body: Buffer; contentType: string }> {
+    const res = await this.fetchImpl(url, { method: "GET" });
+    if (!res.ok) {
+      throw new Error(
+        `Runway video download failed with status ${res.status}`,
+      );
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      body: Buffer.from(arrayBuffer),
+      contentType: res.headers.get("content-type") ?? "video/mp4",
+    };
+  }
+}
+
+// Register the real provider. `mock` remains the default; set VIDEO_PROVIDER=runway
+// (with RUNWAY_API_KEY) to render real videos end-to-end.
+PROVIDER_REGISTRY.runway = () => new RunwayVideoProvider();
+

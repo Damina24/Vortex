@@ -27,6 +27,7 @@ const VIDEO_PROVIDERS = [
   { value: "mock-async", label: "Mock async (poll flow)" },
   { value: "ffmpeg", label: "FFmpeg (local MP4)" },
   { value: "kling", label: "Kling AI" },
+  { value: "runway", label: "Runway AI" },
 ] as const;
 
 export function SceneVideoGenerator({

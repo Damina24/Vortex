@@ -297,6 +297,29 @@ An optional **real** video provider backed by the Kling AI text-to-video API.
   show the active profile as a "Brand DNA" chip, and the new-storyboard page
   surfaces whether a profile will apply to the project.
 
+### Real provider: Runway (`VIDEO_PROVIDER=runway`)
+
+An optional **real** video provider backed by the Runway text-to-video API.
+
+- Set `VIDEO_PROVIDER=runway` and provide `RUNWAY_API_KEY` (from the Runway
+  developer console). Optionally set `RUNWAY_VIDEO_MODEL` (default `gen3a_turbo`).
+- Auth uses a standard `Authorization: Bearer <key>` header.
+- Runway renders asynchronously, so the provider implements the two-phase
+  interface: `submit()` creates a task (`POST /v1/text_to_video` with
+  `model`/`prompt`/`ratio`/`duration`, where `duration` is rounded to Runway's
+  supported `5`/`10` clips and ratios map to Runway's `WIDTH:HEIGHT` strings)
+  and `retrieve(providerJobId, params)` polls `GET /v1/text_to_video/{id}`,
+  returning `processing` for `PENDING`/`RUNNING`/`THROTTLED` and, once
+  `SUCCEEDED`, downloading the finished MP4 from `output` and wrapping it in a
+  `GenerationResult` (real `video/mp4` asset). Failed renders surface Runway's
+  `error` message as the job error.
+- The provider is wired through the exact same submit → poll → complete flow as
+  `mock-async` and `kling`, so no pipeline changes were required — clients
+  already poll `GET /api/v1/generation-jobs/[id]`.
+- Implemented against Runway's public API contract
+  (developers.runwayml.com) — verify the exact request/response shape with a
+  live key before going to production.
+
 ### Real provider: FFmpeg (`VIDEO_PROVIDER=ffmpeg`)
 
 An optional **local** render provider that produces a real, playable MP4 using

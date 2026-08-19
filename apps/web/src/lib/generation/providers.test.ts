@@ -102,12 +102,17 @@ describe("getVideoProvider", () => {
   });
 
   it("throws VideoProviderUnavailableError for unregistered providers", () => {
-    expect(() => getVideoProvider("runway")).toThrowError(
+    expect(() => getVideoProvider("hailuo")).toThrowError(
       VideoProviderUnavailableError,
     );
-    expect(() => getVideoProvider("runway")).toThrowError(
-      /provider "runway" is not available/,
+    expect(() => getVideoProvider("hailuo")).toThrowError(
+      /provider "hailuo" is not available/,
     );
+  });
+
+  it("resolves the real runway provider by name", () => {
+    expect(getVideoProvider("runway").name).toBe("runway");
+    expect(isAsyncVideoProvider(getVideoProvider("runway"))).toBe(true);
   });
 
   it("falls back to the default provider for empty names", () => {

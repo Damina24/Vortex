@@ -12,7 +12,8 @@ import { VideoProviderUnavailableError } from "@/lib/generation/providers";
 const createJobSchema = z.object({
   sceneId: z.string().uuid(),
   /**
-   * Optional render provider name (e.g. `mock`, `mock-async`, `ffmpeg`, `kling`).
+   * Optional render provider name (e.g. `mock`, `mock-async`, `ffmpeg`, `kling`,
+   * `runway`).
    * Defaults to the configured `VIDEO_PROVIDER` (mock) when omitted, so existing
    * clients are unaffected.
    */

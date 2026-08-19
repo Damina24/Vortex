@@ -119,7 +119,7 @@ afterEach(() => {
 
 describe("SceneVideoGenerator", () => {
   describe("rendering states", () => {
-    it("shows all four render providers and the generate button by default", () => {
+    it("shows all render providers and the generate button by default", () => {
       render(<SceneVideoGenerator {...baseProps} />);
 
       const select = screen.getByRole("combobox");
@@ -127,12 +127,13 @@ describe("SceneVideoGenerator", () => {
       expect(select).toHaveValue("mock");
 
       const options = screen.getAllByRole("option");
-      expect(options).toHaveLength(4);
+      expect(options).toHaveLength(5);
       expect(options.map((o) => o.textContent)).toEqual([
         "Mock (fast, offline)",
         "Mock async (poll flow)",
         "FFmpeg (local MP4)",
         "Kling AI",
+        "Runway AI",
       ]);
 
       expect(
