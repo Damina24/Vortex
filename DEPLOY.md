@@ -343,6 +343,31 @@ An optional **real** video provider backed by the MiniMax Hailuo video-generatio
   (platform.minimaxi.com) — verify the exact request/response shape with a live
   key before going to production.
 
+### Real provider: WAN (`VIDEO_PROVIDER=wan`)
+
+An optional **real** video provider backed by the DashScope (Alibaba Model
+Studio) text-to-video API for the WAN models.
+
+- Set `VIDEO_PROVIDER=wan` and provide `WAN_API_KEY` (from the Alibaba Cloud /
+  DashScope console). Optionally set `WAN_MODEL` (default `wan2.2-t2v-flash`).
+- Auth uses a standard `Authorization: Bearer <key>` header.
+- WAN renders asynchronously, so the provider implements the two-phase
+  interface: `submit()` creates a task
+  (`POST /api/v1/services/aigc/text2video/image-synthesis` with
+  `model`/`input.prompt`/`parameters.size`/`parameters.duration`, where
+  `duration` is rounded to WAN's supported `5`/`10` second clips and ratios map
+  to DashScope `WIDTH*HEIGHT` size strings) and
+  `retrieve(providerJobId, params)` polls `GET /api/v1/tasks/{id}`, returning
+  `processing` for `PENDING`/`RUNNING` and, once `SUCCEEDED`, downloading the
+  finished MP4 from `output.video_url` and wrapping it in a `GenerationResult`
+  (real `video/mp4` asset). Failed renders surface DashScope's `message` as the
+  job error.
+- The provider is wired through the exact same submit → poll → complete flow as
+  `mock-async`, `kling`, `runway`, and `hailuo`, so no pipeline changes were
+  required — clients already poll `GET /api/v1/generation-jobs/[id]`.
+- Implemented against DashScope's public WAN API contract (Model Studio) —
+  verify the exact request/response shape with a live key before going to
+  production.
 
 ### Real provider: FFmpeg (`VIDEO_PROVIDER=ffmpeg`)
 

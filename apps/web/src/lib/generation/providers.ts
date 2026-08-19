@@ -1402,3 +1402,252 @@ export class HailuoVideoProvider implements AsyncVideoGenerationProvider {
 // VIDEO_PROVIDER=hailuo (with HAILUO_API_KEY) to render real videos end-to-end.
 PROVIDER_REGISTRY.hailuo = () => new HailuoVideoProvider();
 
+// ============================================================
+// WAN — Alibaba Cloud DashScope text-to-video provider (async two-phase)
+// ============================================================
+// Production-ready provider backed by the DashScope (Alibaba Model Studio)
+// text-to-video API (dashscope.aliyuncs.com) for the WAN models. Like Kling,
+// Runway and Hailuo it is two-phase: `submit()` creates an async task and
+// returns its `task_id`, then `retrieve()` is polled until the render
+// finishes, at which point the finished MP4 is downloaded from `video_url`
+// and wrapped in a `GenerationResult`. Select it with `VIDEO_PROVIDER=wan`
+// and set `WAN_API_KEY`. All network access is injected via `fetchImpl` so
+// the provider is unit-testable without a real key.
+//
+// NOTE: modeled on DashScope's public WAN API contract
+// (bailian.console.aliyun.com / alibabacloud.com Model Studio) — verify the
+// exact request/response shape against your account before going to
+// production.
+
+export interface WanVideoProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  model?: string;
+}
+
+const WAN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/api/v1";
+const WAN_DEFAULT_MODEL = "wan2.2-t2v-flash";
+
+/** DashScope WAN renders 5s or 10s clips; round any requested duration. */
+export function pickWanDuration(seconds: number): number {
+  return seconds <= 7.5 ? 5 : 10;
+}
+
+/** Map our "W:H" aspect ratio to DashScope's "WIDTH*HEIGHT" size strings. */
+export function wanSize(aspectRatio: string): string {
+  switch (aspectRatio) {
+    case "9:16":
+      return "720*1280";
+    case "1:1":
+      return "480*480";
+    default:
+      return "1280*720"; // 16:9
+  }
+}
+
+/** Derive typical output dimensions from an aspect ratio (WAN may omit them). */
+export function wanAspectDimensions(aspectRatio: string): {
+  width: number;
+  height: number;
+} {
+  switch (aspectRatio) {
+    case "9:16":
+      return { width: 720, height: 1280 };
+    case "1:1":
+      return { width: 480, height: 480 };
+    default:
+      return { width: 1280, height: 720 };
+  }
+}
+
+/**
+ * Parses a DashScope API JSON envelope, throwing when the top-level `code`
+ * indicates an error (DashScope reports failures in-band — e.g. HTTP 200 with
+ * `{ "code": "InvalidParameter", "message": "..." }`).
+ */
+function wanJson(body: unknown): Record<string, unknown> {
+  const obj =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const code = obj.code;
+  const codeStr = typeof code === "number" ? String(code) : code;
+  if (typeof codeStr === "string" && codeStr !== "" && codeStr !== "0") {
+    throw new Error(
+      `WAN API error (${codeStr}): ${String(obj.message ?? "unknown error")}`,
+    );
+  }
+  return obj;
+}
+
+
+export class WanVideoProvider implements AsyncVideoGenerationProvider {
+  readonly name = "wan";
+
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly model: string;
+
+  constructor(config: WanVideoProviderConfig = {}) {
+    this.apiKey = config.apiKey ?? process.env.WAN_API_KEY ?? "";
+    this.baseUrl = (config.baseUrl ?? WAN_DEFAULT_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.model = config.model ?? process.env.WAN_MODEL ?? WAN_DEFAULT_MODEL;
+  }
+
+  /** Async providers use `submit` + `retrieve`; `generate` is not used. */
+  async generate(_params: VideoGenerationParams): Promise<GenerationResult> {
+    throw new Error(
+      "WanVideoProvider is two-phase: use submit() then retrieve()",
+    );
+  }
+
+  async submit(params: VideoGenerationParams): Promise<VideoSubmitResult> {
+    this.assertConfigured();
+
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/services/aigc/text2video/image-synthesis`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify({
+          model: this.model,
+          input: {
+            prompt: params.prompt,
+            negative_prompt: params.negativePrompt ?? "",
+          },
+          parameters: {
+            size: wanSize(params.aspectRatio),
+            duration: pickWanDuration(params.duration),
+            prompt_extend: true,
+            watermark: false,
+          },
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`WAN submit failed with status ${response.status}`);
+    }
+    const data = wanJson(await response.json());
+    const output = data.output as Record<string, unknown> | undefined;
+    const taskId = output?.task_id;
+    if (typeof taskId !== "string" || !taskId) {
+      throw new Error("WAN submit returned no task id");
+    }
+    return { providerJobId: taskId };
+  }
+
+  async retrieve(
+    providerJobId: string,
+    params: VideoGenerationParams,
+  ): Promise<VideoRetrieveResult> {
+    this.assertConfigured();
+    const id = encodeURIComponent(providerJobId);
+    const response = await this.fetchImpl(`${this.baseUrl}/tasks/${id}`, {
+      method: "GET",
+      headers: this.authHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`WAN retrieve failed with status ${response.status}`);
+    }
+    const data = wanJson(await response.json());
+    const output = (data.output as Record<string, unknown> | undefined) ?? {};
+    const status = output.task_status;
+
+    if (status === "PENDING" || status === "RUNNING") {
+      return { status: "processing" };
+    }
+
+    if (status === "FAILED" || status === "CANCELED") {
+      return {
+        status: "failed",
+        error: String(output.message ?? "WAN generation failed"),
+      };
+    }
+
+    if (status === "SUCCEEDED") {
+      const url = this.firstVideoUrl(output.video_url);
+      if (!url) {
+        throw new Error("WAN succeeded but returned no video URL");
+      }
+      const file = await this.downloadVideo(url);
+      const dims = wanAspectDimensions(params.aspectRatio);
+      return {
+        status: "succeeded",
+        result: {
+          provider: this.name,
+          providerJobId,
+          width: dims.width,
+          height: dims.height,
+          duration: params.duration,
+          files: [
+            {
+              filename: `wan-${providerJobId.slice(0, 12)}.mp4`,
+              contentType: file.contentType,
+              body: file.body,
+            },
+          ],
+          metadata: {
+            provider: "wan",
+            model: this.model,
+            taskId: providerJobId,
+          },
+        },
+      };
+    }
+
+    throw new Error(`WAN returned unknown task_status: ${String(status)}`);
+  }
+
+  private authHeaders(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  private assertConfigured(): void {
+    if (!this.apiKey) {
+      throw new Error(
+        "WAN_API_KEY is required when VIDEO_PROVIDER=wan",
+      );
+    }
+  }
+
+  private firstVideoUrl(url: unknown): string | undefined {
+    if (typeof url === "string" && url) {
+      return url;
+    }
+    if (url && typeof url === "object") {
+      const nested = (url as Record<string, unknown>).url;
+      if (typeof nested === "string" && nested) {
+        return nested;
+      }
+    }
+    return undefined;
+  }
+
+  private async downloadVideo(
+    url: string,
+  ): Promise<{ body: Buffer; contentType: string }> {
+    const res = await this.fetchImpl(url, { method: "GET" });
+    if (!res.ok) {
+      throw new Error(
+        `WAN video download failed with status ${res.status}`,
+      );
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      body: Buffer.from(arrayBuffer),
+      contentType: res.headers.get("content-type") ?? "video/mp4",
+    };
+  }
+}
+
+// Register the real provider. `mock` remains the default; set
+// VIDEO_PROVIDER=wan (with WAN_API_KEY) to render real videos end-to-end.
+PROVIDER_REGISTRY.wan = () => new WanVideoProvider();
+

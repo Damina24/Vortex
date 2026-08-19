@@ -29,6 +29,7 @@ const VIDEO_PROVIDERS = [
   { value: "kling", label: "Kling AI" },
   { value: "runway", label: "Runway AI" },
   { value: "hailuo", label: "Hailuo AI" },
+  { value: "wan", label: "WAN AI" },
 ] as const;
 
 export function SceneVideoGenerator({

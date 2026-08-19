@@ -102,11 +102,11 @@ describe("getVideoProvider", () => {
   });
 
   it("throws VideoProviderUnavailableError for unregistered providers", () => {
-    expect(() => getVideoProvider("wan")).toThrowError(
+    expect(() => getVideoProvider("sora")).toThrowError(
       VideoProviderUnavailableError,
     );
-    expect(() => getVideoProvider("wan")).toThrowError(
-      /provider "wan" is not available/,
+    expect(() => getVideoProvider("sora")).toThrowError(
+      /provider "sora" is not available/,
     );
   });
 
