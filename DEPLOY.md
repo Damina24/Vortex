@@ -436,6 +436,24 @@ An optional real voiceover provider backed by the OpenAI Text-to-Speech API
   (`openai-audio-provider.test.ts`), and the registry entry keeps `mock` as the
   safe default when `AUDIO_PROVIDER` is unset or unknown.
 
+### Real provider: ElevenLabs (`AUDIO_PROVIDER=elevenlabs`)
+
+An optional real voiceover provider backed by the ElevenLabs Text-to-Speech API
+(`POST /v1/text-to-speech/{voice_id}`, `xi-api-key` header), producing an MP3
+asset.
+
+- Set `AUDIO_PROVIDER=elevenlabs` and provide `ELEVENLABS_API_KEY` (from the
+  ElevenLabs dashboard). Optionally set `ELEVENLABS_MODEL` (default
+  `eleven_multilingual_v2`) and `ELEVENLABS_VOICE_ID` (default `21m00…ikWAM`,
+  the "Rachel" library voice; `params.voice`, if supplied, wins).
+- Voiceover only — `music` kind is rejected with a clear error.
+- Voice settings (stability 0.5 / similarity_boost 0.75 / style 0 /
+  use_speaker_boost) are sent explicitly so generations are consistent.
+- The provider is injected (`fetchImpl`/`baseUrl`/`apiKey`) so its request
+  building and response parsing are unit-tested with a stubbed `fetch`
+  (`elevenlabs-audio-provider.test.ts`), and the registry entry keeps `mock` as
+  the safe default when `AUDIO_PROVIDER` is unset or unknown.
+
 ### Publishing (direct platform publishing)
 
 Publishes finished video assets directly to platforms and records each publish

@@ -255,6 +255,111 @@ export class OpenAiAudioProvider implements AudioGenerationProvider {
 AUDIO_PROVIDER_REGISTRY.openai = () => new OpenAiAudioProvider();
 
 /**
+ * Configuration for the ElevenLabs voiceover provider. Kept injectable so unit
+ * tests can stub the key, base URL, and fetch implementation without a real
+ * key.
+ */
+export interface ElevenLabsAudioProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  model?: string;
+  /** Default voice id used when `params.voice` is not provided. */
+  voiceId?: string;
+}
+
+const ELEVENLABS_DEFAULT_BASE_URL = "https://api.elevenlabs.io";
+const ELEVENLABS_DEFAULT_MODEL = "eleven_multilingual_v2";
+/** "Rachel" — a well-known default voice from the ElevenLabs voice library. */
+const ELEVENLABS_DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+
+/**
+ * Real voiceover provider backed by the ElevenLabs Text-to-Speech API
+ * (`POST /v1/text-to-speech/{voice_id}`, authenticated with the `xi-api-key`
+ * header). The response body is returned as an MP3 audio asset. Select it with
+ * `AUDIO_PROVIDER=elevenlabs` and set `ELEVENLABS_API_KEY`.
+ */
+export class ElevenLabsAudioProvider implements AudioGenerationProvider {
+  readonly name = "elevenlabs";
+
+  constructor(private readonly config: ElevenLabsAudioProviderConfig = {}) {}
+
+  async generate(
+    params: AudioGenerationParams,
+  ): Promise<AudioGenerationResult> {
+    if (params.kind !== "voiceover") {
+      throw new Error("ElevenLabs only supports voiceover generation");
+    }
+
+    const apiKey = this.config.apiKey ?? process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "ELEVENLABS_API_KEY is required when AUDIO_PROVIDER=elevenlabs",
+      );
+    }
+
+    const fetchImpl = this.config.fetchImpl ?? globalThis.fetch;
+    const baseUrl = (
+      this.config.baseUrl ?? ELEVENLABS_DEFAULT_BASE_URL
+    ).replace(/\/+$/, "");
+    const model = this.config.model ?? ELEVENLABS_DEFAULT_MODEL;
+    const voiceId =
+      params.voice ?? this.config.voiceId ?? ELEVENLABS_DEFAULT_VOICE_ID;
+
+    const digest = createHash("sha1")
+      .update(`${params.prompt}:${voiceId}:${model}`)
+      .digest("hex");
+
+    const response = await fetchImpl(
+      `${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: params.prompt,
+          model_id: model,
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0,
+            use_speaker_boost: true,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `ElevenLabs TTS request failed with status ${response.status}`,
+      );
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const body = Buffer.from(arrayBuffer);
+
+    return {
+      provider: this.name,
+      providerJobId: `elevenlabs_tts_${digest.slice(0, 12)}`,
+      duration: Math.max(1, Math.floor(params.duration)),
+      files: [
+        {
+          filename: `voiceover-${digest.slice(0, 8)}.mp3`,
+          contentType: "audio/mpeg",
+          body,
+        },
+      ],
+      metadata: { model, voiceId, format: "mp3", provider: "elevenlabs" },
+    };
+  }
+}
+
+// Register the real provider alongside mock/openai. The default remains `mock`.
+AUDIO_PROVIDER_REGISTRY.elevenlabs = () => new ElevenLabsAudioProvider();
+
+/**
  * Resolves an audio generation provider by name. Defaults to the
  * `AUDIO_PROVIDER` env var (or `mock` for local development). Unknown names
  * throw `AudioProviderUnavailableError` so callers can map it to a 503.
