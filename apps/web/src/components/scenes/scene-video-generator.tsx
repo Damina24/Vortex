@@ -7,6 +7,10 @@ import toast from "react-hot-toast";
 import { CheckCircle2, Clapperboard, RefreshCw, XCircle } from "lucide-react";
 import { notifyCreditsUpdated } from "@/lib/credits-client";
 import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
+import {
+  VIDEO_PROVIDER_CATALOG,
+  type VideoProviderInfo,
+} from "@/lib/generation/providers-catalog";
 
 export interface GeneratedVideoRef {
   id: string;
@@ -21,16 +25,9 @@ export interface GeneratedVideoRef {
  * (which charges credits and — in mock mode — renders synchronously), then
  * refreshes the server component list so the new asset and status appear.
  * Insufficient-credit responses (402) surface the inline buy-credits alert.
+ * `providerOptions` is computed server-side (credential availability); when
+ * omitted every provider is shown as available.
  */
-const VIDEO_PROVIDERS = [
-  { value: "mock", label: "Mock (fast, offline)" },
-  { value: "mock-async", label: "Mock async (poll flow)" },
-  { value: "ffmpeg", label: "FFmpeg (local MP4)" },
-  { value: "kling", label: "Kling AI" },
-  { value: "runway", label: "Runway AI" },
-  { value: "hailuo", label: "Hailuo AI" },
-  { value: "wan", label: "WAN AI" },
-] as const;
 
 export function SceneVideoGenerator({
   sceneId,
@@ -38,6 +35,7 @@ export function SceneVideoGenerator({
   generatedVideo,
   creditCost,
   defaultProvider = "mock",
+  providerOptions,
 }: {
   sceneId: string;
   status: "pending" | "generating" | "completed" | "failed";
@@ -47,6 +45,9 @@ export function SceneVideoGenerator({
    * render a real local MP4 (requires VIDEO_PROVIDER=ffmpeg + ffmpeg installed)
    * or `"mock-async"`/`"kling"` to exercise the two-phase submit/poll flow. */
   defaultProvider?: string;
+  /** Server-computed provider availability (from configured credentials).
+   * Omit to treat every provider as available (e.g. in tests). */
+  providerOptions?: VideoProviderInfo[];
 }) {
   const router = useRouter();
   const [isRendering, setIsRendering] = useState(false);
@@ -58,6 +59,18 @@ export function SceneVideoGenerator({
     defaultProvider ?? "mock",
   );
   const cancelledRef = useRef(false);
+
+  const options: VideoProviderInfo[] =
+    providerOptions ??
+    VIDEO_PROVIDER_CATALOG.map((p) => ({
+      name: p.value,
+      label: p.label,
+      available: true,
+    }));
+  const selectedProvider = options.find((p) => p.name === provider);
+  const selectedUnavailable = Boolean(
+    selectedProvider && !selectedProvider.available,
+  );
 
   useEffect(() => () => {
     cancelledRef.current = true;
@@ -259,22 +272,34 @@ export function SceneVideoGenerator({
           className="text-xs"
           title="Render provider"
         >
-          {VIDEO_PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>
+          {options.map((p) => (
+            <option
+              key={p.name}
+              value={p.name}
+              disabled={!p.available}
+              title={!p.available ? p.reason : undefined}
+            >
               {p.label}
+              {!p.available ? " (not configured)" : ""}
             </option>
           ))}
         </select>
         <button
           type="button"
           onClick={handleGenerate}
-          disabled={isRendering}
+          disabled={isRendering || selectedUnavailable}
           className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-vortex-700 disabled:opacity-50 transition-colors"
         >
           <Clapperboard className="h-4 w-4" />
           {isRendering ? "Rendering…" : `Generate Video · ${creditCost} credits`}
         </button>
       </div>
+      {selectedUnavailable && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {selectedProvider?.reason} — set the env var on the server to enable
+          this provider.
+        </p>
+      )}
       {progress !== null && (
         <div className="h-1.5 w-full max-w-48 overflow-hidden rounded bg-muted">
           <div

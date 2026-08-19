@@ -243,9 +243,16 @@ any external API keys**.
 
 - `VIDEO_PROVIDER=mock` (default) — the only built-in provider. Set
   `MOCK_RENDER_DELAY_MS` to tune the simulated render latency (0 for instant).
-- Real providers (Kling, Runway, WAN, Hailuo, …) implement
+- Real providers (Kling, Runway, Hailuo, WAN, …) implement
   `VideoGenerationProvider` in `apps/web/src/lib/generation/providers.ts`,
   register in `PROVIDER_REGISTRY`, and set `VIDEO_PROVIDER=<name>`.
+- **Provider availability UX** — the Scenes page computes availability
+  server-side (`getVideoProviderAvailability` in `providers.ts`, driven by the
+  credential env vars) and passes it to the scene generator. Providers whose
+  keys aren't configured show as *"(not configured)"*, are disabled in the
+  dropdown, and block the Generate button with an explanatory hint. The
+  catalog (`VIDEO_PROVIDER_CATALOG` in `providers-catalog.ts`) is the shared
+  source of truth for the dropdown labels.
 - **Async (two-phase) providers** — real render providers don't return
   synchronously, so the pipeline supports async providers via `submit()`
   (returns a `providerJobId` immediately) and `retrieve(providerJobId, params)`

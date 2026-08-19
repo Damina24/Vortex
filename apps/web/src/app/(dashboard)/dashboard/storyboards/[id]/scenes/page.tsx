@@ -6,6 +6,7 @@ import { AI_CREDIT_COSTS } from "@/lib/credits";
 import { SceneActions } from "@/components/scenes/scene-actions";
 import { ScenePromptEnhancer } from "@/components/scenes/scene-prompt-enhancer";
 import { SceneVideoGenerator } from "@/components/scenes/scene-video-generator";
+import { getVideoProviderAvailability } from "@/lib/generation/providers";
 import Link from "next/link";
 import { ArrowLeft, Plus, Film, Palette } from "lucide-react";
 
@@ -115,6 +116,7 @@ export default async function StoryboardScenesPage({
                 generatedVideo={scene.generatedVideo}
                 creditCost={AI_CREDIT_COSTS.videoGeneration}
                 defaultProvider={process.env.VIDEO_PROVIDER ?? "mock"}
+                providerOptions={getVideoProviderAvailability()}
               />
 
               <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">

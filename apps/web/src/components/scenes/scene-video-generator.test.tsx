@@ -148,6 +148,89 @@ describe("SceneVideoGenerator", () => {
       expect(screen.getByRole("combobox")).toHaveValue("ffmpeg");
     });
 
+    it("disables providers that are not configured and labels them", () => {
+      render(
+        <SceneVideoGenerator
+          {...baseProps}
+          providerOptions={[
+            { name: "mock", label: "Mock (fast, offline)", available: true },
+            { name: "mock-async", label: "Mock async (poll flow)", available: true },
+            { name: "ffmpeg", label: "FFmpeg (local MP4)", available: true },
+            {
+              name: "kling",
+              label: "Kling AI",
+              available: false,
+              reason: "Requires KLING_API_KEY + KLING_API_SECRET env vars",
+            },
+            {
+              name: "runway",
+              label: "Runway AI",
+              available: false,
+              reason: "Requires RUNWAY_API_KEY env var",
+            },
+            {
+              name: "hailuo",
+              label: "Hailuo AI",
+              available: false,
+              reason: "Requires HAILUO_API_KEY env var",
+            },
+            {
+              name: "wan",
+              label: "WAN AI",
+              available: false,
+              reason: "Requires WAN_API_KEY env var",
+            },
+          ]}
+        />,
+      );
+
+      const options = screen.getAllByRole("option");
+      expect(options).toHaveLength(7);
+      expect(options[3]).toBeDisabled();
+      expect(options[3]).toHaveTextContent("Kling AI (not configured)");
+      expect(options[6]).toBeDisabled();
+      expect(options[6]).toHaveTextContent("WAN AI (not configured)");
+      expect(options[1]).not.toBeDisabled();
+
+      // A keyless default stays selected, so no warning is shown.
+      expect(screen.getByRole("combobox")).toHaveValue("mock");
+      expect(
+        screen.queryByText(/set the env var on the server/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("warns and blocks generation when the selected provider is unavailable", () => {
+      render(
+        <SceneVideoGenerator
+          {...baseProps}
+          defaultProvider="wan"
+          providerOptions={[
+            { name: "mock", label: "Mock (fast, offline)", available: true },
+            { name: "mock-async", label: "Mock async (poll flow)", available: true },
+            { name: "ffmpeg", label: "FFmpeg (local MP4)", available: true },
+            { name: "kling", label: "Kling AI", available: true },
+            { name: "runway", label: "Runway AI", available: true },
+            { name: "hailuo", label: "Hailuo AI", available: true },
+            {
+              name: "wan",
+              label: "WAN AI",
+              available: false,
+              reason: "Requires WAN_API_KEY env var",
+            },
+          ]}
+        />,
+      );
+
+      expect(screen.getByRole("combobox")).toHaveValue("wan");
+      expect(
+        screen.getByText(/Requires WAN_API_KEY env var/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /generate video/i }),
+      ).toBeDisabled();
+    });
+
+
     it("renders an inline player for completed real video renders", () => {
       render(
         <SceneVideoGenerator

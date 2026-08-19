@@ -6,6 +6,7 @@ import {
   buildPosterSvg,
   escapeXml,
   getVideoProvider,
+  getVideoProviderAvailability,
   isAsyncVideoProvider,
   normalizePosterText,
 } from "./providers";
@@ -218,5 +219,61 @@ describe("Async video providers", () => {
     }
     expect(getVideoProvider("mock-async").name).toBe("mock-async");
     expect(isAsyncVideoProvider(getVideoProvider("mock-async"))).toBe(true);
+  });
+});
+
+describe("getVideoProviderAvailability", () => {
+  it("marks keyless providers as available even with no credentials", () => {
+    vi.stubEnv("KLING_API_KEY", "");
+    vi.stubEnv("KLING_API_SECRET", "");
+    vi.stubEnv("RUNWAY_API_KEY", "");
+    vi.stubEnv("HAILUO_API_KEY", "");
+    vi.stubEnv("WAN_API_KEY", "");
+
+    const providers = getVideoProviderAvailability();
+    for (const name of ["mock", "mock-async", "ffmpeg"]) {
+      const provider = providers.find((p) => p.name === name);
+      expect(provider?.available).toBe(true);
+      expect(provider?.reason).toBeUndefined();
+    }
+  });
+
+  it("flags real providers whose credentials are missing", () => {
+    vi.stubEnv("KLING_API_KEY", "");
+    vi.stubEnv("KLING_API_SECRET", "");
+    vi.stubEnv("RUNWAY_API_KEY", "");
+    vi.stubEnv("HAILUO_API_KEY", "");
+    vi.stubEnv("WAN_API_KEY", "");
+
+    const providers = getVideoProviderAvailability();
+    for (const name of ["kling", "runway", "hailuo", "wan"]) {
+      const provider = providers.find((p) => p.name === name);
+      expect(provider?.available).toBe(false);
+      expect(provider?.reason).toMatch(/Requires/);
+    }
+  });
+
+  it("marks real providers as available when their credentials are set", () => {
+    vi.stubEnv("KLING_API_KEY", "k");
+    vi.stubEnv("KLING_API_SECRET", "s");
+    vi.stubEnv("RUNWAY_API_KEY", "r");
+    vi.stubEnv("HAILUO_API_KEY", "h");
+    vi.stubEnv("WAN_API_KEY", "w");
+
+    const providers = getVideoProviderAvailability();
+    for (const name of ["kling", "runway", "hailuo", "wan"]) {
+      expect(providers.find((p) => p.name === name)?.available).toBe(true);
+    }
+  });
+
+  it("reports the exact missing credential names", () => {
+    vi.stubEnv("KLING_API_KEY", "k");
+    vi.stubEnv("KLING_API_SECRET", "");
+
+    const kling = getVideoProviderAvailability().find(
+      (p) => p.name === "kling",
+    );
+    expect(kling?.available).toBe(false);
+    expect(kling?.reason).toBe("Requires KLING_API_SECRET env var");
   });
 });

@@ -1,5 +1,9 @@
 import { createHash, createHmac } from "crypto";
 import { spawn } from "child_process";
+import {
+  VIDEO_PROVIDER_CATALOG,
+  type VideoProviderInfo,
+} from "./providers-catalog";
 
 /**
  * Video generation provider abstraction. Mirrors the AI service's
@@ -215,6 +219,52 @@ export function getVideoProvider(
     );
   }
   return factory();
+}
+
+/** Providers that render without any external credentials. */
+const KEYLESS_VIDEO_PROVIDERS = new Set(["mock", "mock-async", "ffmpeg"]);
+
+/**
+ * Reports which render providers are wired up on this deployment by reading
+ * the credential env vars each real provider requires. Only call this
+ * server-side (server component / API route); the values are deployment
+ * configuration, not client data.
+ */
+export function getVideoProviderAvailability(): VideoProviderInfo[] {
+  return VIDEO_PROVIDER_CATALOG.map(({ value, label }) => {
+    const reason = missingProviderCredentials(value);
+    return reason
+      ? { name: value, label, available: false, reason }
+      : { name: value, label, available: true };
+  });
+}
+
+/** Returns the missing credential names (or undefined when ready to render). */
+function missingProviderCredentials(name: string): string | undefined {
+  if (KEYLESS_VIDEO_PROVIDERS.has(name)) {
+    return undefined;
+  }
+  const required: string[] = [];
+  switch (name) {
+    case "kling":
+      required.push("KLING_API_KEY", "KLING_API_SECRET");
+      break;
+    case "runway":
+      required.push("RUNWAY_API_KEY");
+      break;
+    case "hailuo":
+      required.push("HAILUO_API_KEY");
+      break;
+    case "wan":
+      required.push("WAN_API_KEY");
+      break;
+    default:
+      return undefined;
+  }
+  const missing = required.filter((env) => !process.env[env]);
+  return missing.length > 0
+    ? `Requires ${missing.join(" + ")} env var${missing.length > 1 ? "s" : ""}`
+    : undefined;
 }
 
 // ============================================================
