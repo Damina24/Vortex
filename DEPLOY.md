@@ -320,6 +320,30 @@ An optional **real** video provider backed by the Runway text-to-video API.
   (developers.runwayml.com) — verify the exact request/response shape with a
   live key before going to production.
 
+### Real provider: Hailuo (`VIDEO_PROVIDER=hailuo`)
+
+An optional **real** video provider backed by the MiniMax Hailuo video-generation API.
+
+- Set `VIDEO_PROVIDER=hailuo` and provide `HAILUO_API_KEY` (from the MiniMax
+  platform). Optionally set `HAILUO_MODEL` (default `hailuo-02`).
+- Auth uses a standard `Authorization: Bearer <key>` header.
+- Hailuo renders asynchronously, so the provider implements the two-phase
+  interface: `submit()` creates a task (`POST /v1/video_generation` with
+  `model`/`prompt`/`aspect_ratio`/`duration`, where `duration` is rounded to
+  Hailuo's supported `6`/`8` second clips) and
+  `retrieve(providerJobId, params)` polls `GET /v1/query/video_generation`,
+  returning `processing` for `Queueing`/`Processing` and, once `Success`,
+  downloading the finished MP4 from `video_url` and wrapping it in a
+  `GenerationResult` (real `video/mp4` asset). Failed renders surface MiniMax's
+  `base_resp.status_msg` as the job error.
+- The provider is wired through the exact same submit → poll → complete flow as
+  `mock-async`, `kling`, and `runway`, so no pipeline changes were required —
+  clients already poll `GET /api/v1/generation-jobs/[id]`.
+- Implemented against MiniMax's public Hailuo API contract
+  (platform.minimaxi.com) — verify the exact request/response shape with a live
+  key before going to production.
+
+
 ### Real provider: FFmpeg (`VIDEO_PROVIDER=ffmpeg`)
 
 An optional **local** render provider that produces a real, playable MP4 using

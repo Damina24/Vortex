@@ -127,13 +127,14 @@ describe("SceneVideoGenerator", () => {
       expect(select).toHaveValue("mock");
 
       const options = screen.getAllByRole("option");
-      expect(options).toHaveLength(5);
+      expect(options).toHaveLength(6);
       expect(options.map((o) => o.textContent)).toEqual([
         "Mock (fast, offline)",
         "Mock async (poll flow)",
         "FFmpeg (local MP4)",
         "Kling AI",
         "Runway AI",
+        "Hailuo AI",
       ]);
 
       expect(

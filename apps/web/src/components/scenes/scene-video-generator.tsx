@@ -28,6 +28,7 @@ const VIDEO_PROVIDERS = [
   { value: "ffmpeg", label: "FFmpeg (local MP4)" },
   { value: "kling", label: "Kling AI" },
   { value: "runway", label: "Runway AI" },
+  { value: "hailuo", label: "Hailuo AI" },
 ] as const;
 
 export function SceneVideoGenerator({

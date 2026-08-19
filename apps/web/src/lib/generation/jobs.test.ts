@@ -359,7 +359,7 @@ describe("createVideoGenerationJob", () => {
 
   it("rejects unregistered provider names without charging credits", async () => {
     await expect(
-      createVideoGenerationJob({ ...opts, provider: "hailuo" }),
+      createVideoGenerationJob({ ...opts, provider: "wan" }),
     ).rejects.toBeInstanceOf(VideoProviderUnavailableError);
 
     expect(creditsMock.spendCredits).not.toHaveBeenCalled();

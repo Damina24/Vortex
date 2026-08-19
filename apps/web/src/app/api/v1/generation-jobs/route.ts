@@ -13,7 +13,7 @@ const createJobSchema = z.object({
   sceneId: z.string().uuid(),
   /**
    * Optional render provider name (e.g. `mock`, `mock-async`, `ffmpeg`, `kling`,
-   * `runway`).
+   * `runway`, `hailuo`).
    * Defaults to the configured `VIDEO_PROVIDER` (mock) when omitted, so existing
    * clients are unaffected.
    */

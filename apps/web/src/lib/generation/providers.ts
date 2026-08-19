@@ -4,8 +4,8 @@ import { spawn } from "child_process";
 /**
  * Video generation provider abstraction. Mirrors the AI service's
  * provider-agnostic design (`apps/ai-service/src/llm.py`): real render
- * providers (Kling, Runway, WAN, Hailuo, …) implement the same interface
- * later and are resolved by name through `getVideoProvider`.
+ * providers (Kling, Runway, Hailuo, WAN, …) implement the same interface
+ * and are resolved by name through `getVideoProvider`.
  */
 
 export interface VideoGenerationParams {
@@ -220,7 +220,7 @@ export function getVideoProvider(
 // ============================================================
 // Async (two-phase) video providers
 // ============================================================
-// Real render providers (Kling, Runway, WAN, Hailuo, …) submit a job and
+// Real render providers (Kling, Runway, Hailuo, WAN, …) submit a job and
 // return a `providerJobId` immediately, then expose a `retrieve` call that is
 // polled until the render is done. This section defines that capability on top
 // of the sync `generate()` interface and ships a stateless mock that simulates
@@ -1136,4 +1136,269 @@ export class RunwayVideoProvider implements AsyncVideoGenerationProvider {
 // Register the real provider. `mock` remains the default; set VIDEO_PROVIDER=runway
 // (with RUNWAY_API_KEY) to render real videos end-to-end.
 PROVIDER_REGISTRY.runway = () => new RunwayVideoProvider();
+
+// ============================================================
+// Hailuo — MiniMax video-generation API provider (async two-phase)
+// ============================================================
+// Production-ready provider backed by the MiniMax Hailuo video-generation API
+// (api.minimax.chat; api.minimaxi.com for international accounts). Like Kling
+// and Runway it is two-phase: `submit()` creates a task and returns its
+// `task_id`, then `retrieve()` is polled until the render finishes, at which
+// point the finished MP4 is downloaded from `video_url` and wrapped in a
+// `GenerationResult`. Select it with `VIDEO_PROVIDER=hailuo` and set
+// `HAILUO_API_KEY`. All network access is injected via `fetchImpl` so the
+// provider is unit-testable without a real key.
+//
+// NOTE: modeled on MiniMax's public Hailuo API contract
+// (platform.minimaxi.com) — verify the exact request/response shape against
+// your account before going to production.
+
+export interface HailuoVideoProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  model?: string;
+}
+
+const HAILUO_DEFAULT_BASE_URL = "https://api.minimax.chat";
+const HAILUO_DEFAULT_MODEL = "hailuo-02";
+
+/** MiniMax Hailuo renders 6s or 8s clips; round any requested duration. */
+export function pickHailuoDuration(seconds: number): number {
+  return seconds <= 7 ? 6 : 8;
+}
+
+/** Map our "W:H" aspect ratio to MiniMax's "W:H" strings (default 16:9). */
+export function hailuoAspectRatio(aspectRatio: string): string {
+  switch (aspectRatio) {
+    case "9:16":
+      return "9:16";
+    case "1:1":
+      return "1:1";
+    default:
+      return "16:9";
+  }
+}
+
+/** Derive typical output dimensions from an aspect ratio (Hailuo may omit them). */
+export function hailuoAspectDimensions(aspectRatio: string): {
+  width: number;
+  height: number;
+} {
+  switch (aspectRatio) {
+    case "9:16":
+      return { width: 1080, height: 1920 };
+    case "1:1":
+      return { width: 1080, height: 1080 };
+    default:
+      return { width: 1920, height: 1080 };
+  }
+}
+
+/**
+ * Coerces a MiniMax API JSON body into a plain record.
+ */
+function hailuoBody(body: unknown): Record<string, unknown> {
+  return body && typeof body === "object"
+    ? (body as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * Parses a MiniMax API JSON body into a plain record, throwing on a non-zero
+ * `base_resp.status_code` (MiniMax reports app-level errors in-band, typically
+ * with HTTP 200). Used for `submit`, where any error code means the task was
+ * not created; `retrieve` parses leniently so a failed render can be mapped
+ * to a `{ status: "failed" }` result.
+ */
+function hailuoJson(body: unknown): Record<string, unknown> {
+  const obj = hailuoBody(body);
+  const baseResp = obj.base_resp as Record<string, unknown> | undefined;
+  const code = baseResp?.status_code;
+  if (typeof code === "number" && code !== 0) {
+    throw new Error(
+      `Hailuo API error (${code}): ${String(baseResp?.status_msg ?? "unknown error")}`,
+    );
+  }
+  return obj;
+}
+
+export class HailuoVideoProvider implements AsyncVideoGenerationProvider {
+  readonly name = "hailuo";
+
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly model: string;
+
+  constructor(config: HailuoVideoProviderConfig = {}) {
+    this.apiKey = config.apiKey ?? process.env.HAILUO_API_KEY ?? "";
+    this.baseUrl = (config.baseUrl ?? HAILUO_DEFAULT_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.model = config.model ?? process.env.HAILUO_MODEL ?? HAILUO_DEFAULT_MODEL;
+  }
+
+  /** Async providers use `submit` + `retrieve`; `generate` is not used. */
+  async generate(_params: VideoGenerationParams): Promise<GenerationResult> {
+    throw new Error(
+      "HailuoVideoProvider is two-phase: use submit() then retrieve()",
+    );
+  }
+
+  async submit(params: VideoGenerationParams): Promise<VideoSubmitResult> {
+    this.assertConfigured();
+
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/video_generation`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify({
+          model: this.model,
+          prompt: params.prompt,
+          aspect_ratio: hailuoAspectRatio(params.aspectRatio),
+          duration: pickHailuoDuration(params.duration),
+          prompt_optimizer: true,
+          watermark: false,
+          subject_reference: [],
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Hailuo submit failed with status ${response.status}`);
+    }
+    const data = hailuoJson(await response.json());
+    const taskId = data.task_id;
+    if (typeof taskId !== "string" || !taskId) {
+      throw new Error("Hailuo submit returned no task id");
+    }
+    return { providerJobId: taskId };
+  }
+
+  async retrieve(
+    providerJobId: string,
+    params: VideoGenerationParams,
+  ): Promise<VideoRetrieveResult> {
+    this.assertConfigured();
+    const id = encodeURIComponent(providerJobId);
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/query/video_generation?task_id=${id}`,
+      {
+        method: "GET",
+        headers: this.authHeaders(),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Hailuo retrieve failed with status ${response.status}`);
+    }
+    // Parse leniently (no `base_resp` throw) so a failed render is mapped to a
+    // `{ status: "failed" }` result instead of surfacing as a transport error.
+    const data = hailuoBody(await response.json());
+    const status = data.status;
+    const baseResp = data.base_resp as Record<string, unknown> | undefined;
+    const statusCode = baseResp?.status_code;
+
+    if (status === "Queueing" || status === "Processing") {
+      return { status: "processing" };
+    }
+
+    if (status === "Fail") {
+      return {
+        status: "failed",
+        error: String(baseResp?.status_msg ?? "Hailuo generation failed"),
+      };
+    }
+
+    if (status === "Success") {
+      const url = this.firstVideoUrl(data.video_url);
+      if (!url) {
+        throw new Error("Hailuo succeeded but returned no video URL");
+      }
+      const file = await this.downloadVideo(url);
+      const dims = hailuoAspectDimensions(params.aspectRatio);
+      return {
+        status: "succeeded",
+        result: {
+          provider: this.name,
+          providerJobId,
+          width: dims.width,
+          height: dims.height,
+          duration: params.duration,
+          files: [
+            {
+              filename: `hailuo-${providerJobId.slice(0, 12)}.mp4`,
+              contentType: file.contentType,
+              body: file.body,
+            },
+          ],
+          metadata: {
+            provider: "hailuo",
+            model: this.model,
+            taskId: providerJobId,
+          },
+        },
+      };
+    }
+
+    // No recognized status — surface an in-band API error if one was reported.
+    if (typeof statusCode === "number" && statusCode !== 0) {
+      throw new Error(
+        `Hailuo API error (${statusCode}): ${String(baseResp?.status_msg ?? "unknown error")}`,
+      );
+    }
+
+    throw new Error(`Hailuo returned unknown status: ${String(status)}`);
+  }
+
+  private authHeaders(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  private assertConfigured(): void {
+    if (!this.apiKey) {
+      throw new Error(
+        "HAILUO_API_KEY is required when VIDEO_PROVIDER=hailuo",
+      );
+    }
+  }
+
+  private firstVideoUrl(url: unknown): string | undefined {
+    if (typeof url === "string" && url) {
+      return url;
+    }
+    if (url && typeof url === "object") {
+      const nested = (url as Record<string, unknown>).url;
+      if (typeof nested === "string" && nested) {
+        return nested;
+      }
+    }
+    return undefined;
+  }
+
+  private async downloadVideo(
+    url: string,
+  ): Promise<{ body: Buffer; contentType: string }> {
+    const res = await this.fetchImpl(url, { method: "GET" });
+    if (!res.ok) {
+      throw new Error(
+        `Hailuo video download failed with status ${res.status}`,
+      );
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      body: Buffer.from(arrayBuffer),
+      contentType: res.headers.get("content-type") ?? "video/mp4",
+    };
+  }
+}
+
+// Register the real provider. `mock` remains the default; set
+// VIDEO_PROVIDER=hailuo (with HAILUO_API_KEY) to render real videos end-to-end.
+PROVIDER_REGISTRY.hailuo = () => new HailuoVideoProvider();
 
