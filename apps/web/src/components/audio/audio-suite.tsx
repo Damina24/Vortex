@@ -7,6 +7,10 @@ import toast from "react-hot-toast";
 import { AudioLines, Loader2, Music, Sparkles } from "lucide-react";
 import { notifyCreditsUpdated } from "@/lib/credits-client";
 import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
+import {
+  AUDIO_PROVIDER_CATALOG,
+  type AudioProviderInfo,
+} from "@/lib/generation/audio-providers-catalog";
 
 export type AudioAssetRef = {
   id: string;
@@ -22,6 +26,12 @@ export interface AudioSuiteProps {
   projects: { id: string; name: string }[];
   audioAssets: AudioAssetRef[];
   creditCosts: { voiceover: number; music: number };
+  /** Server-computed provider availability (from configured credentials).
+   * Omit to treat every provider as available (e.g. in tests). */
+  providerOptions?: AudioProviderInfo[];
+  /** Audio provider to use. Defaults to `mock`; pass e.g. `"suno"` to generate
+   * real music tracks (requires AUDIO_PROVIDER=suno + SUNO_API_KEY). */
+  defaultProvider?: string;
 }
 
 type AudioKind = "voiceover" | "music";
@@ -41,28 +51,72 @@ export function AudioSuite({
   projects,
   audioAssets,
   creditCosts,
+  providerOptions,
+  defaultProvider = "mock",
 }: AudioSuiteProps) {
   const router = useRouter();
+
+  const options: AudioProviderInfo[] =
+    providerOptions ??
+    AUDIO_PROVIDER_CATALOG.map((p) => ({
+      name: p.value,
+      label: p.label,
+      available: true,
+      kinds: p.kinds,
+    }));
+
+  // The initial kind is always voiceover, so start on a provider that can
+  // actually generate it (e.g. `AUDIO_PROVIDER=suno` alone must not leave the
+  // dropdown on a music-only provider for a voiceover form).
+  const initialKind: AudioKind = "voiceover";
+  const initialSupported = options.filter((p) => p.kinds.includes(initialKind));
+
   const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? "");
-  const [kind, setKind] = useState<AudioKind>("voiceover");
+  const [kind, setKind] = useState<AudioKind>(initialKind);
   const [prompt, setPrompt] = useState("");
   const [duration, setDuration] = useState<number>(15);
   const [voice, setVoice] = useState<string>(VOICES[0]);
+  const [provider, setProvider] = useState<string>(() => {
+    const requested = defaultProvider ?? "mock";
+    if (initialSupported.some((p) => p.name === requested)) return requested;
+    return (
+      initialSupported.find((p) => p.available)?.name ??
+      initialSupported[0]?.name ??
+      "mock"
+    );
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [insufficientMessage, setInsufficientMessage] = useState<string | null>(
     null,
   );
   const cancelledRef = useRef(false);
 
-  useEffect(() => () => {
-    cancelledRef.current = true;
-  }, []);
+  useEffect(
+    () => () => {
+      cancelledRef.current = true;
+    },
+    [],
+  );
+
+  const visibleOptions = options.filter((p) => p.kinds.includes(kind));
+  const selectedProvider = visibleOptions.find((p) => p.name === provider);
+  const selectedUnavailable = Boolean(
+    selectedProvider && !selectedProvider.available,
+  );
 
   const cost = kind === "voiceover" ? creditCosts.voiceover : creditCosts.music;
 
   function switchKind(next: AudioKind) {
     setKind(next);
     setDuration(next === "voiceover" ? 15 : 30);
+    // Providers are kind-specific (Suno is music-only; TTS is voiceover-only).
+    // If the current selection can't generate the new kind, jump to the first
+    // supported, available option (falling back to the first supported one).
+    const supported = options.filter((p) => p.kinds.includes(next));
+    if (!supported.some((p) => p.name === provider)) {
+      const fallback = supported.find((p) => p.available) ?? supported[0];
+      setProvider(fallback?.name ?? "mock");
+    }
   }
 
   async function handleGenerate(e: FormEvent) {
@@ -85,6 +139,7 @@ export function AudioSuite({
         prompt: prompt.trim(),
         duration,
         voice: kind === "voiceover" ? voice : null,
+        provider,
       });
       const job = res.data?.data as { jobId?: string; status?: string };
 
@@ -244,8 +299,39 @@ export function AudioSuite({
         </div>
 
         <label className="space-y-1.5 text-sm">
+          <span className="font-medium">Provider</span>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            disabled={isGenerating}
+            title="Audio provider"
+            className="w-full rounded-lg border bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vortex-500"
+          >
+            {visibleOptions.map((p) => (
+              <option
+                key={p.name}
+                value={p.name}
+                disabled={!p.available}
+                title={!p.available ? p.reason : undefined}
+              >
+                {p.label}
+                {!p.available ? " (not configured)" : ""}
+              </option>
+            ))}
+          </select>
+          {selectedUnavailable && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              {selectedProvider?.reason} — set the env var on the server to
+              enable this provider.
+            </p>
+          )}
+        </label>
+
+        <label className="space-y-1.5 text-sm">
           <span className="font-medium">
-            {kind === "voiceover" ? "Script / voiceover lines" : "Musical direction"}
+            {kind === "voiceover"
+              ? "Script / voiceover lines"
+              : "Musical direction"}
           </span>
           <textarea
             value={prompt}
@@ -291,7 +377,7 @@ export function AudioSuite({
           </p>
           <button
             type="submit"
-            disabled={isGenerating}
+            disabled={isGenerating || selectedUnavailable}
             className="inline-flex items-center gap-2 rounded-lg bg-vortex-600 px-4 py-2 text-sm font-medium text-white hover:bg-vortex-700 disabled:opacity-50 transition-colors"
           >
             {isGenerating ? (

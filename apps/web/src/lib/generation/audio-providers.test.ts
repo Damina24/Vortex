@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AudioProviderUnavailableError,
   MockAudioProvider,
   getAudioProvider,
+  getAudioProviderAvailability,
 } from "./audio-providers";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("MockAudioProvider", () => {
   it("returns a valid silent WAV with the RIFF/WAVE header", async () => {
@@ -90,5 +95,65 @@ describe("getAudioProvider", () => {
     expect(() => getAudioProvider("eleven")).toThrowError(
       /Audio generation provider "eleven"/,
     );
+  });
+});
+
+describe("getAudioProviderAvailability", () => {
+  it("marks mock as available even with no credentials", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("ELEVENLABS_API_KEY", "");
+    vi.stubEnv("SUNO_API_KEY", "");
+
+    const mock = getAudioProviderAvailability().find((p) => p.name === "mock");
+    expect(mock?.available).toBe(true);
+    expect(mock?.reason).toBeUndefined();
+    expect(mock?.kinds).toEqual(["voiceover", "music"]);
+  });
+
+  it("flags real providers whose credentials are missing", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("ELEVENLABS_API_KEY", "");
+    vi.stubEnv("SUNO_API_KEY", "");
+
+    for (const name of ["openai", "elevenlabs", "suno"]) {
+      const provider = getAudioProviderAvailability().find(
+        (p) => p.name === name,
+      );
+      expect(provider?.available).toBe(false);
+      expect(provider?.reason).toMatch(/Requires/);
+    }
+  });
+
+  it("marks real providers as available when their credentials are set", () => {
+    vi.stubEnv("OPENAI_API_KEY", "o");
+    vi.stubEnv("ELEVENLABS_API_KEY", "e");
+    vi.stubEnv("SUNO_API_KEY", "s");
+
+    for (const name of ["openai", "elevenlabs", "suno"]) {
+      const provider = getAudioProviderAvailability().find(
+        (p) => p.name === name,
+      );
+      expect(provider?.available).toBe(true);
+    }
+  });
+
+  it("reports the exact missing credential names", () => {
+    vi.stubEnv("SUNO_API_KEY", "");
+
+    const suno = getAudioProviderAvailability().find((p) => p.name === "suno");
+    expect(suno?.available).toBe(false);
+    expect(suno?.reason).toBe("Requires SUNO_API_KEY env var");
+  });
+
+  it("describes the kinds each provider can generate", () => {
+    const providers = getAudioProviderAvailability();
+
+    expect(providers.find((p) => p.name === "openai")?.kinds).toEqual([
+      "voiceover",
+    ]);
+    expect(providers.find((p) => p.name === "elevenlabs")?.kinds).toEqual([
+      "voiceover",
+    ]);
+    expect(providers.find((p) => p.name === "suno")?.kinds).toEqual(["music"]);
   });
 });

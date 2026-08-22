@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  AudioSuite,
-  type AudioAssetRef,
-} from "@/components/audio/audio-suite";
+import { AudioSuite, type AudioAssetRef } from "@/components/audio/audio-suite";
+import type { AudioProviderInfo } from "@/lib/generation/audio-providers-catalog";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -140,6 +145,7 @@ describe("AudioSuite", () => {
       prompt: "Hello world",
       duration: 15,
       voice: "alloy",
+      provider: "mock",
     });
 
     await flush();
@@ -167,5 +173,110 @@ describe("AudioSuite", () => {
     expect(
       await screen.findByTestId("insufficient-credits-alert"),
     ).toHaveTextContent("Out of credits.");
+  });
+
+  it("shows a provider dropdown filtered to voiceover-capable providers", () => {
+    render(<AudioSuite {...props} />);
+
+    // Initial kind is voiceover → mock, openai, elevenlabs (suno is music-only).
+    const select = screen.getByRole("combobox", { name: /provider/i });
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Mock (offline WAV)", "OpenAI TTS", "ElevenLabs"]);
+    expect(select).toHaveValue("mock");
+  });
+
+  it("filters to music-capable providers and falls back after switching kind", () => {
+    render(<AudioSuite {...props} defaultProvider="openai" />);
+    fireEvent.click(screen.getByRole("button", { name: "Music" }));
+
+    const select = screen.getByRole("combobox", { name: /provider/i });
+    // OpenAI is voiceover-only → fall back to the first music-capable option.
+    expect(select).toHaveValue("mock");
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Mock (offline WAV)", "Suno"]);
+  });
+
+  it("disables unconfigured providers and blocks submit for the selected one", () => {
+    const providerOptions: AudioProviderInfo[] = [
+      {
+        name: "mock",
+        label: "Mock (offline WAV)",
+        available: true,
+        kinds: ["voiceover", "music"],
+      },
+      {
+        name: "openai",
+        label: "OpenAI TTS",
+        available: false,
+        reason: "Requires OPENAI_API_KEY env var",
+        kinds: ["voiceover"],
+      },
+      {
+        name: "elevenlabs",
+        label: "ElevenLabs",
+        available: true,
+        kinds: ["voiceover"],
+      },
+      {
+        name: "suno",
+        label: "Suno",
+        available: true,
+        kinds: ["music"],
+      },
+    ];
+    render(
+      <AudioSuite
+        {...props}
+        providerOptions={providerOptions}
+        defaultProvider="openai"
+      />,
+    );
+
+    const select = screen.getByRole("combobox", { name: /provider/i });
+    expect(
+      within(select).getByRole("option", { name: /OpenAI/ }),
+    ).toBeDisabled();
+    // Selected provider is unavailable → submit blocked and reason shown.
+    expect(
+      screen.getByRole("button", { name: /generate voiceover/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(/Requires OPENAI_API_KEY env var/),
+    ).toBeInTheDocument();
+  });
+
+  it("posts the selected provider after switching to music", async () => {
+    axiosMock.default.post.mockResolvedValueOnce({
+      data: { success: true, data: { status: "completed", jobId: "job-1" } },
+    });
+
+    render(<AudioSuite {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Music" }));
+    fireEvent.change(screen.getByRole("combobox", { name: /provider/i }), {
+      target: { value: "suno" },
+    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: /musical direction/i }),
+      { target: { value: "A chill lo-fi beat" } },
+    );
+    fireEvent.submit(screen.getByRole("form", { name: /audio generation/i }));
+
+    expect(axiosMock.default.post).toHaveBeenCalledWith("/api/v1/audio-jobs", {
+      projectId: "project-1",
+      kind: "music",
+      prompt: "A chill lo-fi beat",
+      duration: 30,
+      voice: null,
+      provider: "suno",
+    });
+
+    await flush();
+    expect(toastMock.success).toHaveBeenCalledWith("Audio generated");
   });
 });

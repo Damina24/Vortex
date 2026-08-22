@@ -4,10 +4,8 @@ import { authOptions } from "@/lib/auth/auth-options";
 import prisma from "@/lib/db/prisma";
 import { AI_CREDIT_COSTS } from "@/lib/credits";
 import { AudioLines } from "lucide-react";
-import {
-  AudioSuite,
-  type AudioAssetRef,
-} from "@/components/audio/audio-suite";
+import { getAudioProviderAvailability } from "@/lib/generation/audio-providers";
+import { AudioSuite, type AudioAssetRef } from "@/components/audio/audio-suite";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +77,8 @@ export default async function AudioPage() {
           voiceover: AI_CREDIT_COSTS.voiceover,
           music: AI_CREDIT_COSTS.music,
         }}
+        defaultProvider={process.env.AUDIO_PROVIDER ?? "mock"}
+        providerOptions={getAudioProviderAvailability()}
       />
     </div>
   );

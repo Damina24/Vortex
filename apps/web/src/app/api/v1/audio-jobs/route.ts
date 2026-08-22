@@ -16,6 +16,12 @@ const createJobSchema = z.object({
   duration: z.number().int().min(1).max(600),
   voice: z.string().nullish(),
   style: z.string().nullish(),
+  /**
+   * Optional audio provider name (e.g. `mock`, `openai`, `elevenlabs`,
+   * `suno`). Defaults to the configured `AUDIO_PROVIDER` (mock) when omitted,
+   * so existing clients are unaffected.
+   */
+  provider: z.string().min(1).optional(),
 });
 
 /**
@@ -48,7 +54,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const { prompt, duration, kind, projectId, voice, style } = validation.data;
+    const { prompt, duration, kind, projectId, voice, style, provider } =
+      validation.data;
 
     const { job, creditsConsumed, remainingBalance } =
       await createAudioGenerationJob({
@@ -59,6 +66,7 @@ export async function POST(req: Request) {
         kind,
         voice: voice ?? null,
         style: style ?? null,
+        provider,
       });
 
     return NextResponse.json(

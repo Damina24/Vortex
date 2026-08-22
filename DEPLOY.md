@@ -419,6 +419,15 @@ null). No schema changes are required.
 - Config: `AUDIO_PROVIDER=mock` (default; simulate latency with
   `MOCK_AUDIO_DELAY_MS`). Real providers implement `AudioGenerationProvider` in
   `src/lib/generation/audio-providers.ts` and register in `AUDIO_PROVIDER_REGISTRY`.
+- **Provider availability UX** — the Audio Suite computes availability
+  server-side (`getAudioProviderAvailability` in `audio-providers.ts`, driven by
+  the credential env vars) and passes it to the suite. Providers whose keys
+  aren't configured show as *"(not configured)"*, are disabled in the dropdown,
+  and block the Generate button with an explanatory hint. The catalog
+  (`AUDIO_PROVIDER_CATALOG` in `audio-providers-catalog.ts`) is the shared
+  source of truth for dropdown labels and per-kind support (Suno is music-only,
+  the TTS providers are voiceover-only), so the dropdown is filtered to
+  providers that can generate the selected kind.
 - The mock provider emits a valid silent PCM WAV; it is deterministic per prompt
   (same prompt + duration ⇒ identical bytes and `providerJobId`).
 

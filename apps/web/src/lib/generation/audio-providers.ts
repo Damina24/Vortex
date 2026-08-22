@@ -1,4 +1,8 @@
 import { createHash } from "crypto";
+import {
+  AUDIO_PROVIDER_CATALOG,
+  type AudioProviderInfo,
+} from "./audio-providers-catalog";
 
 /**
  * Audio generation provider abstraction. Mirrors the AI service's
@@ -601,6 +605,49 @@ AUDIO_PROVIDER_REGISTRY.suno = () => new SunoMusicProvider();
 
 // Register the real provider alongside mock/openai. The default remains `mock`.
 AUDIO_PROVIDER_REGISTRY.elevenlabs = () => new ElevenLabsAudioProvider();
+
+/** Providers that generate without any external credentials. */
+const KEYLESS_AUDIO_PROVIDERS = new Set(["mock"]);
+
+/**
+ * Reports which audio providers are wired up on this deployment by reading
+ * the credential env vars each real provider requires. Only call this
+ * server-side (server component / API route); the values are deployment
+ * configuration, not client data.
+ */
+export function getAudioProviderAvailability(): AudioProviderInfo[] {
+  return AUDIO_PROVIDER_CATALOG.map(({ value, label, kinds }) => {
+    const reason = missingAudioProviderCredentials(value);
+    return reason
+      ? { name: value, label, available: false, reason, kinds }
+      : { name: value, label, available: true, kinds };
+  });
+}
+
+/** Returns the missing credential names (or undefined when ready to generate). */
+function missingAudioProviderCredentials(name: string): string | undefined {
+  if (KEYLESS_AUDIO_PROVIDERS.has(name)) {
+    return undefined;
+  }
+  const required: string[] = [];
+  switch (name) {
+    case "openai":
+      required.push("OPENAI_API_KEY");
+      break;
+    case "elevenlabs":
+      required.push("ELEVENLABS_API_KEY");
+      break;
+    case "suno":
+      required.push("SUNO_API_KEY");
+      break;
+    default:
+      return undefined;
+  }
+  const missing = required.filter((env) => !process.env[env]);
+  return missing.length > 0
+    ? `Requires ${missing.join(" + ")} env var${missing.length > 1 ? "s" : ""}`
+    : undefined;
+}
 
 /**
  * Resolves an audio generation provider by name. Defaults to the
