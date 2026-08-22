@@ -454,6 +454,27 @@ asset.
   (`elevenlabs-audio-provider.test.ts`), and the registry entry keeps `mock` as
   the safe default when `AUDIO_PROVIDER` is unset or unknown.
 
+### Real music provider: Suno (`AUDIO_PROVIDER=suno`)
+
+An optional real music provider backed by a Suno-compatible generation gateway
+(`POST /api/v1/generation` → poll `GET /api/v1/generation/{id}` →
+download the finished clip's `audio_url`), producing an MP3 asset.
+
+- Set `AUDIO_PROVIDER=suno` and provide `SUNO_API_KEY`. Optionally set
+  `SUNO_MODEL` (default `chirp-v3-5`) and `SUNO_BASE_URL` (default
+  `https://api.sunoapi.dev`) via the injectable `SunoAudioProviderConfig`.
+- **Music only** — `voiceover` kind is rejected with a clear error.
+- **Async two-phase** — unlike the TTS providers (which complete synchronously
+  on `POST`), Suno's `generate()` throws: `POST /api/v1/audio-jobs` submits the
+  generation and returns a `processing` job with `providerJobId`, and clients
+  poll `GET /api/v1/audio-jobs/[id]`, which calls `advanceAudioJob` until the
+  gateway reports finished clips (see the async video providers for the same
+  submit → poll → complete flow).
+- The provider is injected (`fetchImpl`/`baseUrl`/`apiKey`) so its request
+  building and response parsing are unit-tested with a stubbed `fetch`
+  (`suno-audio-provider.test.ts`), and the registry entry keeps `mock` as the
+  safe default when `AUDIO_PROVIDER` is unset or unknown.
+
 ### Publishing (direct platform publishing)
 
 Publishes finished video assets directly to platforms and records each publish

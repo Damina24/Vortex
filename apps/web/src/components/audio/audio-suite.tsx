@@ -28,7 +28,7 @@ type AudioKind = "voiceover" | "music";
 
 const VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
 const POLL_INTERVAL_MS = 1500;
-const MAX_POLL_ATTEMPTS = 60; // ~90 seconds of polling for async providers
+const MAX_POLL_ATTEMPTS = 120; // ~3 minutes of polling for async providers (Suno)
 
 /**
  * Audio Suite: pick a project, choose voiceover/music, describe what you want,

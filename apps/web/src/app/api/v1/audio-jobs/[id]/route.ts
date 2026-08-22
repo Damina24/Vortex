@@ -2,14 +2,16 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth-options";
 import {
+  advanceAudioJob,
   getAudioJobForUser,
-  toAudioJobResponse,
 } from "@/lib/generation/audio-jobs";
 
 /**
- * Returns a single audio generation job for the current user. Useful for
- * polling — mock renders complete synchronously, but real TTS/music providers
- * run asynchronously and clients can poll this endpoint until completion.
+ * Returns a single audio generation job for the current user. Also advances
+ * two-phase jobs (Suno music, …) one poll: while the provider reports the
+ * track is still rendering the job stays `processing`, and once it is ready
+ * the rendered file is persisted and the job completes. Mock/openai/elevenlabs
+ * complete synchronously on `POST`, so this is purely a poll-endpoint for them.
  */
 export async function GET(_req: Request, ctx: { params: { id: string } }) {
   try {
@@ -29,7 +31,11 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       );
     }
 
-    return NextResponse.json({ success: true, data: toAudioJobResponse(job) });
+    const { job: advanced } = await advanceAudioJob(job, {
+      userId: session.user.id,
+    });
+
+    return NextResponse.json({ success: true, data: advanced });
   } catch (error) {
     console.error("Error fetching audio generation job:", error);
     return NextResponse.json(

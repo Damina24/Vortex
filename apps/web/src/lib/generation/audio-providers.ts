@@ -46,6 +46,40 @@ export class AudioProviderUnavailableError extends Error {
   }
 }
 
+// --- Async (two-phase) audio providers --------------------------------------
+// Real music providers (Suno, …) submit a generation and return a
+// `providerJobId` immediately, then expose a `retrieve` call that is polled
+// until the track is ready — mirroring the async video providers in
+// `./providers`. `generate()` remains the synchronous interface for one-shot
+// TTS providers (mock/openai/elevenlabs).
+
+export interface AudioSubmitResult {
+  providerJobId: string;
+}
+
+export type AudioRetrieveResult =
+  | { status: "processing"; progress?: number }
+  | { status: "succeeded"; result: AudioGenerationResult }
+  | { status: "failed"; error: string };
+
+export interface AsyncAudioGenerationProvider extends AudioGenerationProvider {
+  submit(params: AudioGenerationParams): Promise<AudioSubmitResult>;
+  /** `params` mirrors the original request; real providers may ignore it. */
+  retrieve(
+    providerJobId: string,
+    params: AudioGenerationParams,
+  ): Promise<AudioRetrieveResult>;
+}
+
+/** Capability check: is this provider two-phase (submit/poll/complete)? */
+export function isAsyncAudioProvider(
+  provider: AudioGenerationProvider,
+): provider is AsyncAudioGenerationProvider {
+  return (
+    typeof (provider as AsyncAudioGenerationProvider).submit === "function"
+  );
+}
+
 // The WAV buffer type is shared with the video providers module.
 import type { GeneratedFile } from "./providers";
 
@@ -355,6 +389,215 @@ export class ElevenLabsAudioProvider implements AudioGenerationProvider {
     };
   }
 }
+
+// ============================================================
+// Suno — music-generation API provider (async two-phase)
+// ============================================================
+// Production-ready provider backed by a Suno-compatible generation gateway
+// (the widely deployed `api.sunoapi.dev`-style API): `POST /api/v1/generation`
+// kicks off a music-generation batch and returns its id, then
+// `GET /api/v1/generation/{id}` is polled until its `output` array contains
+// finished clips, at which point the first clip's `audio_url` is downloaded
+// and wrapped in an `AudioGenerationResult`. Select it with
+// `AUDIO_PROVIDER=suno` and set `SUNO_API_KEY`.
+//
+// NOTE: modeled on the public Suno gateway contract — verify the exact
+// request/response shape against the gateway you integrate with before going
+// to production.
+export interface SunoAudioProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  model?: string;
+}
+
+const SUNO_DEFAULT_BASE_URL = "https://api.sunoapi.dev";
+const SUNO_DEFAULT_MODEL = "chirp-v3-5";
+
+/** Coerces a Suno gateway JSON body into a plain record (unwraps `data`). */
+function sunoJson(body: unknown): Record<string, unknown> {
+  if (body === null || typeof body !== "object") return {};
+  const record = body as Record<string, unknown>;
+  if (
+    typeof record.data === "object" &&
+    record.data !== null &&
+    !Array.isArray(record.data)
+  ) {
+    return { ...record, ...(record.data as Record<string, unknown>) };
+  }
+  return record;
+}
+
+export class SunoMusicProvider implements AsyncAudioGenerationProvider {
+  readonly name = "suno";
+
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly model: string;
+
+  constructor(config: SunoAudioProviderConfig = {}) {
+    this.apiKey = config.apiKey ?? process.env.SUNO_API_KEY ?? "";
+    this.baseUrl = (config.baseUrl ?? SUNO_DEFAULT_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+    this.fetchImpl = config.fetchImpl ?? globalThis.fetch;
+    this.model = config.model ?? process.env.SUNO_MODEL ?? SUNO_DEFAULT_MODEL;
+  }
+
+  /** Suno is two-phase: use `submit()` then `retrieve()` (polled by the API). */
+  async generate(
+    _params: AudioGenerationParams,
+  ): Promise<AudioGenerationResult> {
+    throw new Error(
+      "SunoMusicProvider is two-phase: use submit() then retrieve()",
+    );
+  }
+
+  async submit(params: AudioGenerationParams): Promise<AudioSubmitResult> {
+    this.assertConfigured();
+    if (params.kind !== "music") {
+      throw new Error("Suno only supports music generation");
+    }
+
+    const body: Record<string, unknown> = {
+      prompt: params.prompt,
+      title: params.projectName ?? "Untitled track",
+      make_instrumental: false,
+      model: this.model,
+    };
+    if (params.style) body.style = params.style;
+
+    const response = await this.fetchImpl(`${this.baseUrl}/api/v1/generation`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`Suno submit failed with status ${response.status}`);
+    }
+
+    const data = sunoJson(await response.json());
+    if (data.status === false) {
+      throw new Error(
+        `Suno submit failed: ${String(data.message ?? data.error ?? "unknown error")}`,
+      );
+    }
+    const jobId = typeof data.id === "string" ? (data.id as string) : undefined;
+    if (!jobId) {
+      throw new Error("Suno submit returned no generation id");
+    }
+    return { providerJobId: jobId };
+  }
+
+  async retrieve(
+    providerJobId: string,
+    params: AudioGenerationParams,
+  ): Promise<AudioRetrieveResult> {
+    this.assertConfigured();
+    const id = encodeURIComponent(providerJobId);
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/v1/generation/${id}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Suno retrieve failed with status ${response.status}`);
+    }
+
+    const data = sunoJson(await response.json());
+    if (data.status === false || data.failed === true) {
+      return {
+        status: "failed",
+        error: String(data.message ?? data.error ?? "Suno generation failed"),
+      };
+    }
+
+    const clips = Array.isArray(data.output) ? data.output : [];
+    if (clips.length === 0) {
+      return { status: "processing" };
+    }
+
+    const firstClip = clips.find(
+      (clip): clip is Record<string, unknown> =>
+        typeof clip === "object" &&
+        clip !== null &&
+        typeof (clip as Record<string, unknown>).audio_url === "string",
+    );
+    if (!firstClip) {
+      // Clips exist but none has a finished audio_url yet — keep polling.
+      return { status: "processing" };
+    }
+
+    const audioUrl = String(firstClip.audio_url);
+    const file = await this.downloadAudio(audioUrl);
+
+    const rawDuration = Number(firstClip.duration);
+    const duration =
+      Number.isFinite(rawDuration) && rawDuration > 0
+        ? Math.max(1, Math.round(rawDuration))
+        : Math.max(1, Math.floor(params.duration));
+
+    const digest = createHash("sha1").update(providerJobId).digest("hex");
+
+    return {
+      status: "succeeded",
+      result: {
+        provider: this.name,
+        providerJobId,
+        duration,
+        files: [
+          {
+            filename: `suno-${digest.slice(0, 8)}.mp3`,
+            contentType: file.contentType,
+            body: file.body,
+          },
+        ],
+        metadata: {
+          model: this.model,
+          title: typeof firstClip.title === "string" ? firstClip.title : null,
+          imageUrl:
+            typeof firstClip.image_url === "string"
+              ? firstClip.image_url
+              : null,
+          format: "mp3",
+          provider: "suno",
+        },
+      },
+    };
+  }
+
+  private assertConfigured(): void {
+    if (!this.apiKey) {
+      throw new Error("SUNO_API_KEY is required when AUDIO_PROVIDER=suno");
+    }
+  }
+
+  private async downloadAudio(
+    url: string,
+  ): Promise<{ body: Buffer; contentType: string }> {
+    const res = await this.fetchImpl(url, { method: "GET" });
+    if (!res.ok) {
+      throw new Error(`Suno audio download failed with status ${res.status}`);
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      body: Buffer.from(arrayBuffer),
+      contentType: res.headers.get("content-type") ?? "audio/mpeg",
+    };
+  }
+}
+
+// Register the real music provider alongside mock/openai/elevenlabs. The
+// default remains `mock`; set AUDIO_PROVIDER=suno (with SUNO_API_KEY) to
+// generate real tracks end-to-end.
+AUDIO_PROVIDER_REGISTRY.suno = () => new SunoMusicProvider();
 
 // Register the real provider alongside mock/openai. The default remains `mock`.
 AUDIO_PROVIDER_REGISTRY.elevenlabs = () => new ElevenLabsAudioProvider();

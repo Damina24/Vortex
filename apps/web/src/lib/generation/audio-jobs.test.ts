@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AudioProjectNotFoundError,
   type CreateAudioJobInput,
+  type PersistedAudioJob,
+  advanceAudioJob,
   createAudioGenerationJob,
   getAudioJobForUser,
   toAudioJobResponse,
@@ -311,5 +313,206 @@ describe("toAudioJobResponse", () => {
       outputAssets: [{ id: "asset-9", url: "https://x/y.wav" }],
       errorMessage: undefined,
     });
+  });
+});
+describe("async (two-phase) audio providers", () => {
+  const asyncResult: AudioResult = {
+    provider: "suno",
+    providerJobId: "suno-gen-1",
+    duration: 61,
+    files: [
+      {
+        filename: "suno-abc.mp3",
+        contentType: "audio/mpeg",
+        body: Buffer.from(new Uint8Array([1, 2, 3])),
+      },
+    ],
+    metadata: { provider: "suno", model: "chirp-v3-5" },
+  };
+
+  const asyncProvider = {
+    name: "suno",
+    generate: vi.fn(async () => {
+      throw new Error("async audio providers do not implement generate");
+    }),
+    submit: vi.fn(async () => ({ providerJobId: "suno-gen-1" })),
+    retrieve: vi.fn(async () => ({
+      status: "succeeded" as const,
+      result: asyncResult,
+    })),
+  };
+
+  it("submits an async job and returns it processing instead of completing", async () => {
+    db.generationJob.findUniqueOrThrow.mockResolvedValueOnce({
+      id: "job-a1",
+      providerJobId: "suno-gen-1",
+      status: "processing",
+      creditsConsumed: 8,
+      outputAssets: [],
+      errorMessage: null,
+    } as never);
+
+    const result = await createAudioGenerationJob({
+      ...baseInput,
+      kind: "music",
+      provider: asyncProvider,
+    });
+
+    expect(asyncProvider.submit).toHaveBeenCalledTimes(1);
+    expect(db.generationJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "job-a1" },
+        data: expect.objectContaining({ providerJobId: "suno-gen-1" }),
+      }),
+    );
+    // The synchronous finalize path must not run for async providers.
+    expect(db.asset.create).not.toHaveBeenCalled();
+    expect(result.job.status).toBe("processing");
+  });
+
+  it("marks the job failed when async submit errors", async () => {
+    const failing = {
+      ...asyncProvider,
+      submit: vi.fn(async () => {
+        throw new Error("suno gateway down");
+      }),
+    };
+
+    await expect(
+      createAudioGenerationJob({
+        ...baseInput,
+        kind: "music",
+        provider: failing,
+      }),
+    ).rejects.toThrow("suno gateway down");
+
+    expect(db.generationJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "job-a1" },
+        data: expect.objectContaining({
+          status: "failed",
+          errorMessage: "suno gateway down",
+        }),
+      }),
+    );
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  const runningJob: PersistedAudioJob = {
+    id: "job-a1",
+    projectId: "project-1",
+    provider: "suno",
+    providerJobId: "suno-gen-1",
+    status: "processing",
+    creditsConsumed: 8,
+    outputAssets: [],
+    errorMessage: null,
+    inputParams: {
+      prompt: "upbeat synthwave",
+      kind: "music",
+      duration: 60,
+      voice: null,
+      style: "synthwave",
+    },
+  };
+
+  it("advanceAudioJob keeps a processing job in flight", async () => {
+    const idleProvider = {
+      ...asyncProvider,
+      retrieve: vi.fn(async () => ({ status: "processing" as const })),
+    };
+
+    const result = await advanceAudioJob(runningJob, {
+      userId: "user-1",
+      providerOverride: idleProvider,
+    });
+
+    expect(result.status).toBe("processing");
+    expect(idleProvider.retrieve).toHaveBeenCalledWith(
+      "suno-gen-1",
+      expect.objectContaining({ prompt: "upbeat synthwave", kind: "music" }),
+    );
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("advanceAudioJob marks the job failed when the provider reports failure", async () => {
+    const failedProvider = {
+      ...asyncProvider,
+      retrieve: vi.fn(async () => ({
+        status: "failed" as const,
+        error: "generation canceled",
+      })),
+    };
+
+    const result = await advanceAudioJob(runningJob, {
+      userId: "user-1",
+      providerOverride: failedProvider,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(db.generationJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "job-a1" },
+        data: expect.objectContaining({
+          status: "failed",
+          errorMessage: "generation canceled",
+        }),
+      }),
+    );
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("advanceAudioJob completes the job by storing files and creating the asset", async () => {
+    const result = await advanceAudioJob(runningJob, {
+      userId: "user-1",
+      providerOverride: asyncProvider,
+    });
+
+    expect(asyncProvider.retrieve).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("completed");
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          teamId: "team-1",
+          projectId: "project-1",
+          type: "audio",
+          duration: 61,
+          createdBy: "user-1",
+        }),
+      }),
+    );
+    expect(db.generationJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "job-a1" },
+        data: expect.objectContaining({ status: "completed" }),
+      }),
+    );
+  });
+
+  it("advanceAudioJob leaves a sync-provider processing job unchanged", async () => {
+    const result = await advanceAudioJob(
+      {
+        ...runningJob,
+        provider: "mock",
+      },
+      { userId: "user-1", providerOverride: stubProvider },
+    );
+
+    expect(result.status).toBe("processing");
+    expect(db.asset.create).not.toHaveBeenCalled();
+  });
+
+  it("advanceAudioJob returns terminal jobs without calling the provider", async () => {
+    const result = await advanceAudioJob(
+      {
+        ...runningJob,
+        status: "queued",
+        providerJobId: null,
+      },
+      { userId: "user-1", providerOverride: asyncProvider },
+    );
+
+    expect(result.status).toBe("queued");
+    expect(asyncProvider.retrieve).not.toHaveBeenCalled();
   });
 });
