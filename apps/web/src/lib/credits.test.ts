@@ -120,6 +120,7 @@ describe("AI_CREDIT_COSTS", () => {
     expect(AI_CREDIT_COSTS.videoGeneration).toBe(10);
     expect(AI_CREDIT_COSTS.voiceover).toBe(5);
     expect(AI_CREDIT_COSTS.music).toBe(8);
+    expect(AI_CREDIT_COSTS.imageGeneration).toBe(1);
   });
 });
 

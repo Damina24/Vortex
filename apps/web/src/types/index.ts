@@ -267,6 +267,13 @@ export interface GenerationJobResponse {
  */
 export type AudioJobResponse = GenerationJobResponse;
 
+/**
+ * Image generation is a distinct job type but reuses the same persisted
+ * `GenerationJob` row and response shape as the other pipelines; this alias
+ * keeps the Image Suite API typed without duplicating the mapping logic.
+ */
+export type ImageJobResponse = GenerationJobResponse;
+
 // ============================================================
 // Analytics Types
 // ============================================================

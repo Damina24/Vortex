@@ -16,6 +16,8 @@ export const AI_CREDIT_COSTS = {
   voiceover: 5,
   /** Cost per background music track generated via the pipeline. */
   music: 8,
+  /** Cost per image generation via the generation pipeline. */
+  imageGeneration: 1,
 } as const;
 
 /** Thrown when a user does not have enough credits for an operation. */

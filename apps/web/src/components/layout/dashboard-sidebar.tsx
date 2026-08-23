@@ -14,6 +14,7 @@ import {
   Users,
   Send,
   Music,
+  ImageIcon,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -66,6 +67,11 @@ const sidebarItems = [
     label: "Audio",
     href: "/dashboard/audio",
     icon: Music,
+  },
+  {
+    label: "Images",
+    href: "/dashboard/image",
+    icon: ImageIcon,
   },
   {
     label: "Team",

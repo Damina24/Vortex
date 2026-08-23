@@ -484,6 +484,62 @@ download the finished clip's `audio_url`), producing an MP3 asset.
   (`suno-audio-provider.test.ts`), and the registry entry keeps `mock` as the
   safe default when `AUDIO_PROVIDER` is unset or unknown.
 
+### Image generation
+
+Image generation uses the **exact same** `generation_jobs` + `credit_transactions` +
+`Asset` machinery as video/audio — it just selects the `JobType` `image` and
+creates an `image` `Asset` (populating `width`/`height`, leaving `duration`
+null). No schema changes are required.
+
+- `POST /api/v1/image-jobs` `{ projectId, prompt, aspectRatio: "16:9"|"9:16"|"1:1"|"4:5", style?, provider? }` — charges **1** credit, creates a job of type
+  `image`, runs it through `queued → processing → completed | failed`, persists
+  the rendered file(s) to storage, and creates an `image` `Asset` under the
+  project.
+- `GET /api/v1/image-jobs/[id]` — poll-ready status (mock completes synchronously).
+- Config: `IMAGE_PROVIDER=mock` (default; simulate latency with
+  `MOCK_IMAGE_DELAY_MS`). Real providers implement `ImageGenerationProvider` in
+  `src/lib/generation/image-providers.ts` and register in `IMAGE_PROVIDER_REGISTRY`.
+- **Provider availability UX** — the Image Suite computes availability
+  server-side (`getImageProviderAvailability` in `image-providers.ts`, driven by
+  the credential env vars) and passes it to the suite. Providers whose keys
+  aren't configured are disabled in the dropdown and block the Generate button
+  with an explanatory hint. The catalog (`IMAGE_PROVIDER_CATALOG` in
+  `image-providers-catalog.ts`) is the shared source of truth for dropdown
+  labels and the aspect-ratio options (`IMAGE_ASPECT_RATIOS`).
+- The mock provider emits a deterministic SVG poster; it is deterministic per
+  prompt + aspect ratio (same inputs ⇒ identical bytes and `providerJobId`).
+
+### Real provider: Stability (`IMAGE_PROVIDER=stability`)
+
+An optional real image provider backed by the Stability AI image-generation API
+(`POST /v2beta/stable-image/generate/core`, `multipart/form-data`, Bearer key),
+producing a PNG asset.
+
+- Set `IMAGE_PROVIDER=stability` and provide `STABILITY_API_KEY` (or pass
+  `apiKey`/`baseUrl` to the injected `StabilityImageProviderConfig`).
+- Synchronous one-shot: `POST /api/v1/image-jobs` completes the render in one
+  request and returns a `completed` job.
+- The provider is injected (`fetchImpl`/`baseUrl`/`apiKey`) so its request
+  building and response parsing are unit-tested with a stubbed `fetch`
+  (`image-providers.test.ts`), and the registry entry keeps `mock` as the safe
+  default when `IMAGE_PROVIDER` is unset or unknown.
+
+### Real image provider: FLUX (`IMAGE_PROVIDER=flux`)
+
+An optional real image provider backed by a FLUX-compatible generation gateway
+(`POST /v1/images/generations/{model}` → poll `GET /v1/images/generations/{id}`
+→ decode the result's base64 `sample`), producing a PNG asset.
+
+- Set `IMAGE_PROVIDER=flux` and provide `FLUX_API_KEY`. Optionally set
+  `FLUX_MODEL` (default `flux-schnell`) and the base URL via the injectable
+  `FluxImageProviderConfig`.
+- **Async two-phase** — unlike mock/stability (which complete synchronously on
+  `POST`), FLUX's `generate()` throws: `POST /api/v1/image-jobs` submits the
+  generation and returns a `processing` job with `providerJobId`, and clients
+  poll `GET /api/v1/image-jobs/[id]`, which calls `advanceImageJob` until the
+  gateway reports the image is ready (see the async audio/video providers for
+  the same submit → poll → complete flow).
+
 ### Publishing (direct platform publishing)
 
 Publishes finished video assets directly to platforms and records each publish
