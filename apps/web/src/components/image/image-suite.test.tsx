@@ -82,6 +82,11 @@ const props = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The Project picker fetches the selected project's brand profile on mount;
+  // default to "no profile" so unrelated tests don't depend on it.
+  axiosMock.default.get.mockResolvedValue({
+    data: { success: true, data: { brandDna: null } },
+  });
 });
 
 afterEach(() => {
@@ -112,6 +117,34 @@ describe("ImageSuite", () => {
   it("shows the empty library state when no images exist", () => {
     render(<ImageSuite {...props} imageAssets={[]} />);
     expect(screen.getByText(/no images yet/i)).toBeInTheDocument();
+  });
+
+  it("shows the active Brand DNA chip for the selected project", async () => {
+    axiosMock.default.get.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { brandDna: { id: "bd-1", name: "Acme Organic" } },
+      },
+    });
+
+    render(<ImageSuite {...props} />);
+    await flush();
+
+    expect(
+      screen.getByText(/Brand DNA: Acme Organic/i),
+    ).toBeInTheDocument();
+    expect(axiosMock.default.get).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1",
+    );
+  });
+
+  it("shows the no-brand hint when the selected project has no profile", async () => {
+    render(<ImageSuite {...props} />);
+    await flush();
+
+    expect(
+      screen.getByText(/No brand profile assigned/i),
+    ).toBeInTheDocument();
   });
 
   it("defaults the aspect ratio to 16:9 and updates on selection", async () => {
@@ -215,9 +248,14 @@ it("posts the selected provider and completes synchronously in mock mode", async
         data: { status: "processing", jobId: "job-1" },
       },
     });
-    axiosMock.default.get.mockResolvedValueOnce({
-      data: { success: true, data: { status: "completed" } },
-    });
+    axiosMock.default.get
+      // Mount effect fetches the selected project's brand profile first.
+      .mockResolvedValueOnce({
+        data: { success: true, data: { brandDna: null } },
+      })
+      .mockResolvedValueOnce({
+        data: { success: true, data: { status: "completed" } },
+      });
 
     render(<ImageSuite {...props} />);
     fireEvent.change(screen.getByRole("textbox", { name: /prompt/i }), {

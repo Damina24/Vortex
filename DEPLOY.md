@@ -438,7 +438,8 @@ null). No schema changes are required.
   request prompt in `createAudioGenerationJob`. The user's prompt is never
   mutated; the job's `inputParams` store the enriched prompt so the audit trail
   (and the async Suno completion path, which reads from `inputParams`) reflects
-  exactly what the provider rendered.
+  exactly what the provider rendered. The Audio Suite surfaces the selected
+  project's profile as a "Brand Voice" chip (and a hint when none is assigned).
 
 ### Real provider: OpenAI TTS (`AUDIO_PROVIDER=openai`)
 
@@ -525,7 +526,8 @@ null). No schema changes are required.
   colors/words are both appended as guidance to the request prompt in
   `createImageGenerationJob`. The user's prompt and the job's `inputParams`
   trail always reflect the enriched render request, matching what the provider
-  actually rendered.
+  actually rendered. The Image Suite surfaces the selected project's profile as
+  a "Brand DNA" chip (and a hint when none is assigned).
 
 ### Real provider: Stability (`IMAGE_PROVIDER=stability`)
 

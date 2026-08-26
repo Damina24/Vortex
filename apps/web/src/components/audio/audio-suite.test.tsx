@@ -81,6 +81,11 @@ const props = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The Project picker fetches the selected project's brand profile on mount;
+  // default to "no profile" so unrelated tests don't depend on it.
+  axiosMock.default.get.mockResolvedValue({
+    data: { success: true, data: { brandDna: null } },
+  });
 });
 
 afterEach(() => {
@@ -114,6 +119,62 @@ describe("AudioSuite", () => {
   it("shows the empty library state when no audio exists", () => {
     render(<AudioSuite {...props} audioAssets={[]} />);
     expect(screen.getByText(/no audio yet/i)).toBeInTheDocument();
+  });
+
+  it("shows the active Brand Voice chip for the selected project", async () => {
+    axiosMock.default.get.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { brandDna: { id: "bd-1", name: "Acme Organic" } },
+      },
+    });
+
+    render(<AudioSuite {...props} />);
+    await flush();
+
+    expect(
+      screen.getByText(/Brand Voice: Acme Organic/i),
+    ).toBeInTheDocument();
+    expect(axiosMock.default.get).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1",
+    );
+  });
+
+  it("shows the no-brand hint when the selected project has no profile", async () => {
+    render(<AudioSuite {...props} />);
+    await flush();
+
+    expect(
+      screen.getByText(/No brand profile assigned/i),
+    ).toBeInTheDocument();
+  });
+
+  it("re-fetches the brand profile when the project changes", async () => {
+    axiosMock.default.get
+      .mockResolvedValueOnce({
+        data: { success: true, data: { brandDna: null } },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: { brandDna: { id: "bd-2", name: "Webinar Brand" } },
+        },
+      });
+
+    render(<AudioSuite {...props} />);
+    await flush();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /project/i }), {
+      target: { value: "project-2" },
+    });
+    await flush();
+
+    expect(axiosMock.default.get).toHaveBeenCalledWith(
+      "/api/v1/projects/project-2",
+    );
+    expect(
+      screen.getByText(/Brand Voice: Webinar Brand/i),
+    ).toBeInTheDocument();
   });
 
   it("switching to music updates the cost label and default duration", () => {

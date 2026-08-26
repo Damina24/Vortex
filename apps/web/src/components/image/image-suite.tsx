@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import toast from "react-hot-toast";
-import { ImageIcon, Loader2, Sparkles } from "lucide-react";
+import { ImageIcon, Loader2, Palette, Sparkles } from "lucide-react";
 import { notifyCreditsUpdated } from "@/lib/credits-client";
 import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 import {
@@ -82,6 +82,32 @@ export function ImageSuite({
     null,
   );
   const cancelledRef = useRef(false);
+  // undefined = still loading; null = the selected project has no profile.
+  const [brandName, setBrandName] = useState<string | null | undefined>(
+    undefined,
+  );
+
+  // The project picker drives which brand profile applies to a generation, so
+  // fetch it whenever the selection changes (mirrors the new-storyboard flag).
+  useEffect(() => {
+    if (!projectId) {
+      setBrandName(null);
+      return;
+    }
+    let cancelled = false;
+    axios
+      .get(`/api/v1/projects/${projectId}`)
+      .then((res) => {
+        if (!cancelled)
+          setBrandName(res.data?.data?.brandDna?.name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setBrandName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   useEffect(
     () => () => {
@@ -225,6 +251,23 @@ if (insufficientMessage) {
             ))}
           </select>
         </label>
+
+        {brandName !== undefined && (
+          <div>
+            {brandName ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-vortex-500/40 bg-vortex-50 px-2.5 py-1 text-xs font-medium text-vortex-700 dark:bg-vortex-950/50 dark:text-vortex-300">
+                <Palette className="h-3.5 w-3.5" />
+                Brand DNA: {brandName} — images will follow these brand
+                guidelines.
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                No brand profile assigned — images won't follow brand
+                guidelines.
+              </span>
+            )}
+          </div>
+        )}
 
         <label className="block text-sm font-medium">
           Prompt
