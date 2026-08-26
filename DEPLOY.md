@@ -430,6 +430,15 @@ null). No schema changes are required.
   providers that can generate the selected kind.
 - The mock provider emits a valid silent PCM WAV; it is deterministic per prompt
   (same prompt + duration ⇒ identical bytes and `providerJobId`).
+- **Brand Voice auto-enforcement** — when the project has a brand profile
+  assigned, audio generation honors it via `enrichAudioPrompt`
+  (`src/lib/brand-dna.ts`). Because audio sends a single text prompt with no
+  separate negative field, the brand's voice directives — tone adjectives,
+  sentence structure, and forbidden words — are appended as guidance to the
+  request prompt in `createAudioGenerationJob`. The user's prompt is never
+  mutated; the job's `inputParams` store the enriched prompt so the audit trail
+  (and the async Suno completion path, which reads from `inputParams`) reflects
+  exactly what the provider rendered.
 
 ### Real provider: OpenAI TTS (`AUDIO_PROVIDER=openai`)
 

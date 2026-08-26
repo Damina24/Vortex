@@ -8,7 +8,7 @@ import {
   getAudioJobForUser,
   toAudioJobResponse,
 } from "./audio-jobs";
-import { AudioProviderUnavailableError } from "./audio-providers";
+import { AudioProviderUnavailableError, type AudioGenerationParams, type AudioGenerationProvider } from "./audio-providers";
 import { InsufficientCreditsError } from "@/lib/credits";
 
 interface UpdateArgs {
@@ -224,6 +224,77 @@ describe("createAudioGenerationJob", () => {
         data: expect.objectContaining({ jobType: "music" }),
       }),
     );
+  });
+
+  it("enriches the provider prompt with the project's Brand Voice", async () => {
+    db.project.findUnique.mockResolvedValueOnce({
+      id: "project-branded-audio",
+      teamId: "team-1",
+      createdBy: "user-1",
+      name: "Branded Audio Co",
+      brandDna: {
+        id: "bd-audio-1",
+        name: "Branded Audio Co",
+        visualIdentity: {
+          colors: { primary: ["#0B3C2D"], secondary: [], forbidden: [] },
+          typography: { headingFont: "Bebas Neue", bodyFont: "Inter", minSizePx: 16 },
+          logo: { variants: [], placementRules: "top_left", minSizePercent: 12 },
+        },
+        voiceTone: {
+          voice: {
+            adjectives: ["energetic", "trustworthy"],
+            forbiddenWords: ["cheap"],
+            sentenceStructure: "short_punchy",
+          },
+          characters: {},
+        },
+        complianceRules: {
+          compliance: {
+            requiredDisclaimers: [],
+            industry: "general",
+            regionalRules: {},
+          },
+        },
+        createdAt: new Date("2026-01-01"),
+        updatedAt: new Date("2026-01-02"),
+      },
+    } as never);
+
+    const generateMock = vi.fn<AudioGenerationProvider["generate"]>(
+      async () => ({
+        provider: "mock-branded-audio",
+        providerJobId: "branded-audio-1",
+        duration: 4,
+        files: [
+          {
+            filename: "branded.wav",
+            contentType: "audio/wav",
+            body: Buffer.from(new Uint8Array(44 + 10)),
+          },
+        ],
+        metadata: {},
+      }),
+    );
+    const brandProvider = {
+      name: "mock-branded-audio",
+      generate: generateMock,
+    };
+
+    await createAudioGenerationJob({
+      ...baseInput,
+      projectId: "project-branded-audio",
+      provider: brandProvider,
+    });
+
+    const captured = generateMock.mock.calls[0]?.[0] as AudioGenerationParams;
+    expect(captured.prompt).toContain("Brand voice:");
+    expect(captured.prompt).toContain("tone of voice: energetic, trustworthy");
+    expect(captured.prompt).toContain('avoid words: "cheap"');
+
+    // The audit trail stored on the job reflects the enriched render request.
+    const createCall = db.generationJob.create.mock
+      .calls[0]?.[0] as { data: { inputParams: Record<string, unknown> } };
+    expect(createCall.data.inputParams.prompt).toContain("Brand voice:");
   });
 
   it("rejects up front when credits are insufficient", async () => {

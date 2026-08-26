@@ -9,6 +9,7 @@ import {
   isAsyncAudioProvider,
   type AudioGenerationProvider,
 } from "./audio-providers";
+import { enrichAudioPrompt } from "@/lib/brand-dna";
 
 /** Re-export so callers depend only on the audio module. */
 export { toJobResponse as toAudioJobResponse };
@@ -252,11 +253,26 @@ export async function createAudioGenerationJob(
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, teamId: true, createdBy: true, name: true },
+    select: {
+      id: true,
+      teamId: true,
+      createdBy: true,
+      name: true,
+      brandDna: true,
+    },
   });
   if (!project || project.createdBy !== userId) {
     throw new AudioProjectNotFoundError();
   }
+
+  // Apply the project's assigned Brand Voice to the render request: the brand's
+  // tone adjectives, sentence structure, and forbidden words are folded into the
+  // prompt. The user's prompt is never mutated — only the provider request gains
+  // the suffix.
+  const enrichedPrompt = enrichAudioPrompt({
+    prompt,
+    brand: project.brandDna,
+  }).prompt;
 
   const provider =
     typeof providerInput === "string"
@@ -279,7 +295,7 @@ export async function createAudioGenerationJob(
       creditsConsumed: cost,
       inputParams: {
         kind,
-        prompt,
+        prompt: enrichedPrompt,
         duration,
         voice: voice ?? null,
         style: style ?? null,
@@ -298,7 +314,7 @@ export async function createAudioGenerationJob(
   if (isAsyncAudioProvider(provider)) {
     try {
       const submitted = await provider.submit({
-        prompt,
+        prompt: enrichedPrompt,
         kind,
         duration,
         voice: voice ?? null,
@@ -326,7 +342,7 @@ export async function createAudioGenerationJob(
   let result: Awaited<ReturnType<AudioGenerationProvider["generate"]>>;
   try {
     result = await provider.generate({
-      prompt,
+      prompt: enrichedPrompt,
       kind,
       duration,
       voice: voice ?? null,

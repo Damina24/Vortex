@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   brandDnaToPayload,
   buildBrandContext,
+  buildBrandVoiceSuffix,
   composeBrandContext,
   defaultBrandDnaPayload,
+  enrichAudioPrompt,
   enrichImagePrompt,
   payloadToBrandDnaJson,
   type BrandDnaPayload,
@@ -268,6 +270,88 @@ describe("enrichImagePrompt", () => {
       "Brand style: logo placement top_left; logo minimum size 10% of frame.",
     );
     expect(result.prompt).not.toContain("avoid colors");
+    expect(result.prompt).not.toContain("avoid words");
+  });
+});
+
+describe("buildBrandVoiceSuffix", () => {
+  it("maps adjectives, sentence structure, and forbidden words to directives", () => {
+    const suffix = buildBrandVoiceSuffix(brandDnaToPayload(rowFixture));
+
+    expect(suffix).toContain("tone of voice: energetic, trustworthy");
+    expect(suffix).toContain("short, punchy sentences");
+    expect(suffix).toContain('avoid words: "cheap"');
+  });
+
+  it("maps descriptive and technical sentence structures", () => {
+    const descriptive = defaultBrandDnaPayload();
+    descriptive.voice.sentenceStructure = "descriptive";
+    expect(buildBrandVoiceSuffix(descriptive)).toContain(
+      "descriptive, flowing sentences",
+    );
+
+    const technical = defaultBrandDnaPayload();
+    technical.voice.sentenceStructure = "technical";
+    expect(buildBrandVoiceSuffix(technical)).toContain(
+      "technical, precise phrasing",
+    );
+  });
+
+  it("periods and empties the avoidance segment when no words are forbidden", () => {
+    const payload = defaultBrandDnaPayload();
+    const suffix = buildBrandVoiceSuffix(payload);
+
+    expect(suffix).toContain("Brand voice:");
+    expect(suffix).toContain("short, punchy sentences");
+    expect(suffix).not.toContain("avoid words");
+  });
+});
+
+describe("enrichAudioPrompt", () => {
+  it("leaves the prompt untouched when no brand is assigned", () => {
+    expect(
+      enrichAudioPrompt({ prompt: "upbeat summer track", brand: null }).prompt,
+    ).toBe("upbeat summer track");
+
+    expect(
+      enrichAudioPrompt({
+        prompt: "upbeat summer track",
+        brand: undefined,
+      }).prompt,
+    ).toBe("upbeat summer track");
+  });
+
+  it("folds the brand voice directives into the single prompt", () => {
+    const result = enrichAudioPrompt({
+      prompt: "a confident launch voiceover",
+      brand: rowFixture,
+    });
+
+    expect(result.prompt).toContain("a confident launch voiceover");
+    expect(result.prompt).toContain("Brand voice:");
+    expect(result.prompt).toContain("tone of voice: energetic, trustworthy");
+    expect(result.prompt).toContain('avoid words: "cheap"');
+  });
+
+  it("always emits a suffix for a brand row via the default sentence structure", () => {
+    const emptyRow: BrandDnaRow = {
+      id: "bd-empty",
+      name: "Empty",
+      visualIdentity: null,
+      voiceTone: {},
+      complianceRules: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = enrichAudioPrompt({
+      prompt: "laid-back lounge music",
+      brand: emptyRow,
+    });
+
+    expect(result.prompt).toContain("laid-back lounge music");
+    expect(result.prompt).toContain("Brand voice:");
+    expect(result.prompt).toContain("short, punchy sentences");
     expect(result.prompt).not.toContain("avoid words");
   });
 });

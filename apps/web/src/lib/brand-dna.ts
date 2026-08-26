@@ -487,3 +487,69 @@ export function enrichImagePrompt(input: {
 
   return { prompt: `${input.prompt.trim()}\n\n${sections.join(" ")}` };
 }
+
+// ============================================================
+// Brand voice enrichment (audio generation prompts)
+// ============================================================
+
+/** Renders each brand sentence-structure choice as an audio directive. */
+const BRAND_SENTENCE_HINTS: Record<
+  BrandVoice["sentenceStructure"],
+  string
+> = {
+  short_punchy: "short, punchy sentences",
+  descriptive: "descriptive, flowing sentences",
+  technical: "technical, precise phrasing",
+};
+
+/**
+ * Builds a compact voice-style suffix for audio generation so voiceovers/music
+ * match the brand's voice. Adjectives become a tone directive, the sentence
+ * structure a phrasing hint, and forbidden words a plainly-stated avoidance
+ * rule. The normalized default sentence structure is always emitted, so a brand
+ * row always contributes a suffix (mirroring how the visual helper always emits
+ * the default logo rules).
+ */
+export function buildBrandVoiceSuffix(payload: BrandDnaPayload): string | null {
+  const parts: string[] = [];
+
+  const adjectives = cleanList(payload.voice.adjectives);
+  if (adjectives.length > 0) {
+    parts.push(`tone of voice: ${adjectives.join(", ")}`);
+  }
+
+  parts.push(BRAND_SENTENCE_HINTS[payload.voice.sentenceStructure]);
+
+  const forbiddenWords = cleanList(payload.voice.forbiddenWords);
+  if (forbiddenWords.length > 0) {
+    parts.push(
+      `avoid words: ${forbiddenWords.map((word) => `"${word}"`).join(", ")}`,
+    );
+  }
+
+  return `Brand voice: ${parts.join("; ")}.`;
+}
+
+/**
+ * Enriches an audio generation prompt with the project's brand voice (tone,
+ * sentence structure, forbidden words). Audio sends a single prompt with no
+ * separate negative field, so avoidance rules are folded in as guidance. The
+ * stored prompt is never mutated — only the provider request gains the suffix.
+ * Returns the prompt unchanged when no brand is assigned.
+ */
+export function enrichAudioPrompt(input: {
+  prompt: string;
+  brand: BrandDnaRow | null | undefined;
+}): { prompt: string } {
+  if (!input.brand) {
+    return { prompt: input.prompt };
+  }
+
+  const payload = brandDnaToPayload(input.brand);
+  const suffix = buildBrandVoiceSuffix(payload);
+  if (!suffix) {
+    return { prompt: input.prompt };
+  }
+
+  return { prompt: `${input.prompt.trim()}\n\n${suffix}` };
+}
