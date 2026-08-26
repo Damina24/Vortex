@@ -8,7 +8,7 @@ import {
   getImageJobForUser,
   toImageJobResponse,
 } from "./image-jobs";
-import { ImageProviderUnavailableError } from "./image-providers";
+import { ImageProviderUnavailableError, type ImageGenerationParams, type ImageGenerationProvider } from "./image-providers";
 import { InsufficientCreditsError } from "@/lib/credits";
 
 interface UpdateArgs {
@@ -225,6 +225,83 @@ describe("createImageGenerationJob", () => {
         }),
       }),
     );
+  });
+
+  it("enriches the provider prompt with the project's Brand DNA", async () => {
+    db.project.findUnique.mockResolvedValueOnce({
+      id: "project-branded",
+      teamId: "team-1",
+      createdBy: "user-1",
+      name: "Branded Co",
+      brandDna: {
+        id: "bd-img-1",
+        name: "Branded Co",
+        visualIdentity: {
+          colors: {
+            primary: ["#0B3C2D"],
+            secondary: ["#D4A24E"],
+            forbidden: ["#FF0000"],
+          },
+          typography: { headingFont: "Bebas Neue", bodyFont: "Inter", minSizePx: 16 },
+          logo: { variants: [], placementRules: "top_left", minSizePercent: 12 },
+        },
+        voiceTone: {
+          voice: {
+            adjectives: ["energetic"],
+            forbiddenWords: ["cheap"],
+            sentenceStructure: "short_punchy",
+          },
+          characters: {},
+        },
+        complianceRules: {
+          compliance: {
+            requiredDisclaimers: [],
+            industry: "health",
+            regionalRules: {},
+          },
+        },
+        createdAt: new Date("2026-01-01"),
+        updatedAt: new Date("2026-01-02"),
+      },
+    } as never);
+
+    const generateMock = vi.fn<ImageGenerationProvider["generate"]>(
+      async () => ({
+        provider: "mock-branded",
+        providerJobId: "branded-image-1",
+        width: 1920,
+        height: 1080,
+        files: [
+          {
+            filename: "branded.svg",
+            contentType: "image/svg+xml",
+            body: Buffer.from("<svg/>"),
+          },
+        ],
+        metadata: {},
+      }),
+    );
+    const brandProvider = { name: "mock-branded", generate: generateMock };
+
+    await createImageGenerationJob({
+      ...baseInput,
+      projectId: "project-branded",
+      provider: brandProvider,
+    });
+
+    const captured = generateMock.mock.calls[0]?.[0] as ImageGenerationParams;
+    expect(captured.prompt).toContain("Brand style:");
+    expect(captured.prompt).toContain("brand colors #0B3C2D");
+    expect(captured.prompt).toContain("heading font Bebas Neue");
+    // Image generation has no separate negative field, so avoidance rules are
+    // folded directly into the prompt.
+    expect(captured.prompt).toContain("avoid colors #FF0000");
+    expect(captured.prompt).toContain('avoid words "cheap"');
+
+    // The audit trail stored on the job reflects the enriched render request.
+    const createCall = db.generationJob.create.mock
+      .calls[0]?.[0] as { data: { inputParams: Record<string, unknown> } };
+    expect(createCall.data.inputParams.prompt).toContain("Brand style:");
   });
 
   it("rejects up front when credits are insufficient", async () => {

@@ -508,6 +508,15 @@ null). No schema changes are required.
   labels and the aspect-ratio options (`IMAGE_ASPECT_RATIOS`).
 - The mock provider emits a deterministic SVG poster; it is deterministic per
   prompt + aspect ratio (same inputs ⇒ identical bytes and `providerJobId`).
+- **Brand DNA auto-enforcement** — when the project has a brand profile assigned,
+  image generation honors it via `enrichImagePrompt` (`src/lib/brand-dna.ts`).
+  Because image generation sends a single text prompt with no separate negative
+  field, the profile's visual style guide (brand colors, accent colors,
+  heading/body fonts, logo placement and minimum size) and its forbidden
+  colors/words are both appended as guidance to the request prompt in
+  `createImageGenerationJob`. The user's prompt and the job's `inputParams`
+  trail always reflect the enriched render request, matching what the provider
+  actually rendered.
 
 ### Real provider: Stability (`IMAGE_PROVIDER=stability`)
 

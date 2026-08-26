@@ -4,6 +4,7 @@ import {
   buildBrandContext,
   composeBrandContext,
   defaultBrandDnaPayload,
+  enrichImagePrompt,
   payloadToBrandDnaJson,
   type BrandDnaPayload,
   type BrandDnaRow,
@@ -214,5 +215,59 @@ describe("composeBrandContext", () => {
   it("returns null when there is neither a profile nor a brief", () => {
     expect(composeBrandContext(null, undefined)).toBeNull();
     expect(composeBrandContext(null, "   ")).toBeNull();
+  });
+});
+
+describe("enrichImagePrompt", () => {
+  it("leaves the prompt untouched when no brand is assigned", () => {
+    const result = enrichImagePrompt({ prompt: "a fox in snow", brand: null });
+    expect(result.prompt).toBe("a fox in snow");
+
+    expect(
+      enrichImagePrompt({ prompt: "a fox in snow", brand: undefined }).prompt,
+    ).toBe("a fox in snow");
+  });
+
+  it("folds the brand style guide and avoidance rules into the single prompt", () => {
+    const result = enrichImagePrompt({
+      prompt: "a sleek sports car",
+      brand: rowFixture,
+    });
+
+    expect(result.prompt).toContain("Brand style:");
+    expect(result.prompt).toContain("brand colors #0B3C2D");
+    expect(result.prompt).toContain("accent colors #D4A24E");
+    expect(result.prompt).toContain("heading font Bebas Neue");
+    expect(result.prompt).toContain("body font Inter");
+    expect(result.prompt).toContain("logo placement top_left");
+    expect(result.prompt).toContain("logo minimum size 12% of frame");
+    expect(result.prompt).toContain("avoid colors #FF0000");
+    expect(result.prompt).toContain('avoid words "cheap"');
+  });
+
+  it("carries the default logo rules for an otherwise-empty profile", () => {
+    const emptyRow: BrandDnaRow = {
+      id: "bd-empty",
+      name: "Empty",
+      visualIdentity: null,
+      voiceTone: {},
+      complianceRules: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = enrichImagePrompt({
+      prompt: "a fox in a forest",
+      brand: emptyRow,
+    });
+
+    // Normalized defaults (logo placement + min size) are always present, so a
+    // brand row still contributes a style suffix; audiences/avoidance are empty.
+    expect(result.prompt).toContain("a fox in a forest");
+    expect(result.prompt).toContain(
+      "Brand style: logo placement top_left; logo minimum size 10% of frame.",
+    );
+    expect(result.prompt).not.toContain("avoid colors");
+    expect(result.prompt).not.toContain("avoid words");
   });
 });

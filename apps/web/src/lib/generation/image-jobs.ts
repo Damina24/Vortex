@@ -9,6 +9,7 @@ import {
   isAsyncImageProvider,
   type ImageGenerationProvider,
 } from "./image-providers";
+import { enrichImagePrompt } from "@/lib/brand-dna";
 
 /** Re-export so callers depend only on the image module. */
 export { toJobResponse as toImageJobResponse };
@@ -229,11 +230,26 @@ export async function createImageGenerationJob(
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, teamId: true, createdBy: true, name: true },
+    select: {
+      id: true,
+      teamId: true,
+      createdBy: true,
+      name: true,
+      brandDna: true,
+    },
   });
   if (!project || project.createdBy !== userId) {
     throw new ImageProjectNotFoundError();
   }
+
+  // Apply the project's assigned Brand DNA to the render request: the visual
+  // style guide (colors, typography, logo rules) and the brand's forbidden
+  // colors/words are folded into the prompt. The user's prompt is never
+  // mutated — only the provider request gains the suffix.
+  const enrichedPrompt = enrichImagePrompt({
+    prompt,
+    brand: project.brandDna,
+  }).prompt;
 
   const provider =
     typeof providerInput === "string"
@@ -255,7 +271,7 @@ export async function createImageGenerationJob(
       status: "queued",
       creditsConsumed: cost,
       inputParams: {
-        prompt,
+        prompt: enrichedPrompt,
         aspectRatio,
         style: style ?? null,
       } as unknown as Prisma.InputJsonValue,
@@ -273,7 +289,7 @@ export async function createImageGenerationJob(
   if (isAsyncImageProvider(provider)) {
     try {
       const submitted = await provider.submit({
-        prompt,
+        prompt: enrichedPrompt,
         aspectRatio,
         style: style ?? null,
         projectName: project.name ?? null,
@@ -299,7 +315,7 @@ export async function createImageGenerationJob(
   let result: Awaited<ReturnType<ImageGenerationProvider["generate"]>>;
   try {
     result = await provider.generate({
-      prompt,
+      prompt: enrichedPrompt,
       aspectRatio,
       style: style ?? null,
       projectName: project.name ?? null,

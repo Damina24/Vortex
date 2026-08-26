@@ -455,3 +455,35 @@ export function enrichScenePrompts(input: {
       : input.negativePrompt,
   };
 }
+
+/**
+ * Enriches an image generation prompt with the project's brand visual identity
+ * (colors, typography, logo rules) plus the brand's forbidden-colors/words
+ * guidance. Unlike scenes, image generation sends a single text prompt with no
+ * separate negative-prompt field, so avoidance rules are folded into the prompt
+ * as guidance. The stored prompt is never mutated — only the provider request
+ * gains the suffix. Returns the prompt unchanged when no brand is assigned or
+ * the profile expresses no visual rules.
+ */
+export function enrichImagePrompt(input: {
+  prompt: string;
+  brand: BrandDnaRow | null | undefined;
+}): { prompt: string } {
+  if (!input.brand) {
+    return { prompt: input.prompt };
+  }
+
+  const payload = brandDnaToPayload(input.brand);
+  const styleSuffix = buildBrandVisualPromptSuffix(payload);
+  const negativeSuffix = buildBrandNegativePromptSuffix(payload);
+
+  const sections: string[] = [];
+  if (styleSuffix) sections.push(styleSuffix);
+  if (negativeSuffix) sections.push(negativeSuffix);
+
+  if (sections.length === 0) {
+    return { prompt: input.prompt };
+  }
+
+  return { prompt: `${input.prompt.trim()}\n\n${sections.join(" ")}` };
+}
