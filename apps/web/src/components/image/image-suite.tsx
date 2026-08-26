@@ -262,7 +262,7 @@ if (insufficientMessage) {
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">
-                No brand profile assigned — images won't follow brand
+                No brand profile assigned — images will not follow brand
                 guidelines.
               </span>
             )}

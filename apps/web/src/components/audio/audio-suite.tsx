@@ -334,7 +334,7 @@ export function AudioSuite({
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">
-                No brand profile assigned — audio won't follow brand
+                No brand profile assigned — audio will not follow brand
                 guidelines.
               </span>
             )}
