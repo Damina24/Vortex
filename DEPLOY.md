@@ -528,6 +528,14 @@ null). No schema changes are required.
   trail always reflect the enriched render request, matching what the provider
   actually rendered. The Image Suite surfaces the selected project's profile as
   a "Brand DNA" chip (and a hint when none is assigned).
+- **AI prompt enhancement** — the Image Suite includes an *Enhance with AI*
+  button next to the prompt. It calls `POST /api/v1/ai/enhance-prompt` with the
+  selected `projectId` + aspect ratio; the route resolves the project's
+  assigned Brand DNA server-side (the same `composeBrandContext` injection the
+  `sceneId` path uses) so the LLM's rewrite stays on-brand. The reviewer can
+  Apply the enhanced prompt into the textarea or discard it. Charges
+  `enhancePrompt` (default 1 credit); 402 responses surface the inline
+  buy-credits alert.
 
 ### Real provider: Stability (`IMAGE_PROVIDER=stability`)
 

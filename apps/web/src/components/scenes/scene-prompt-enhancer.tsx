@@ -13,8 +13,8 @@ interface ScenePromptEnhancerProps {
 }
 
 interface EnhanceResult {
-  prompt: string;
-  negativePrompt: string | null;
+  enhancedPrompt: string;
+  enhancedNegativePrompt: string;
 }
 
 /**
@@ -64,8 +64,8 @@ export function ScenePromptEnhancer({ sceneId }: ScenePromptEnhancerProps) {
     setIsApplying(true);
     try {
       await axios.patch(`/api/v1/scenes/${sceneId}`, {
-        prompt: preview.prompt,
-        negativePrompt: preview.negativePrompt ?? "",
+        prompt: preview.enhancedPrompt,
+        negativePrompt: preview.enhancedNegativePrompt ?? "",
       });
       toast.success("Enhanced prompt saved");
       setPreview(null);
@@ -91,10 +91,10 @@ export function ScenePromptEnhancer({ sceneId }: ScenePromptEnhancerProps) {
             <Sparkles className="h-3 w-3" />
             Enhanced preview
           </p>
-          <p className="text-muted-foreground">{preview.prompt}</p>
-          {preview.negativePrompt ? (
+          <p className="text-muted-foreground">{preview.enhancedPrompt}</p>
+          {preview.enhancedNegativePrompt ? (
             <p className="mt-2 text-xs italic text-muted-foreground">
-              Negative: {preview.negativePrompt}
+              Negative: {preview.enhancedNegativePrompt}
             </p>
           ) : null}
           <div className="mt-3 flex items-center gap-2">

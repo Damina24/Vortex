@@ -4,8 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import toast from "react-hot-toast";
-import { ImageIcon, Loader2, Palette, Sparkles } from "lucide-react";
-import { notifyCreditsUpdated } from "@/lib/credits-client";
+import { Check, ImageIcon, Loader2, Palette, Sparkles, X } from "lucide-react";
+import { isInsufficientCreditsError, notifyCreditsUpdated } from "@/lib/credits-client";
 import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 import {
   IMAGE_ASPECT_RATIOS,
@@ -81,11 +81,19 @@ export function ImageSuite({
   const [insufficientMessage, setInsufficientMessage] = useState<string | null>(
     null,
   );
-  const cancelledRef = useRef(false);
   // undefined = still loading; null = the selected project has no profile.
   const [brandName, setBrandName] = useState<string | null | undefined>(
     undefined,
   );
+  const [enhancePreview, setEnhancePreview] = useState<{
+    enhancedPrompt: string;
+    enhancedNegativePrompt: string;
+  } | null>(null);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhanceInsufficientMessage, setEnhanceInsufficientMessage] = useState<
+    string | null
+  >(null);
+  const cancelledRef = useRef(false);
 
   // The project picker drives which brand profile applies to a generation, so
   // fetch it whenever the selection changes (mirrors the new-storyboard flag).
@@ -204,7 +212,57 @@ export function ImageSuite({
     toast("Image is still generating — check back in a moment.");
     void router.refresh();
   }
-if (insufficientMessage) {
+
+  async function handleEnhance() {
+    if (!projectId) {
+      toast.error("Pick a project first.");
+      return;
+    }
+    if (!prompt.trim()) {
+      toast.error("Add a prompt to enhance first.");
+      return;
+    }
+    setIsEnhancing(true);
+    setEnhanceInsufficientMessage(null);
+    try {
+      const { data } = await axios.post("/api/v1/ai/enhance-prompt", {
+        projectId,
+        prompt: prompt.trim(),
+        aspectRatio,
+      });
+      setEnhancePreview(data.data);
+      notifyCreditsUpdated();
+      const cost = data.credits?.cost ?? 1;
+      toast.success(
+        `Prompt enhanced — ${cost} credit${cost === 1 ? "" : "s"} used, ${
+          data.credits?.remaining ?? "?"
+        } remaining`,
+      );
+    } catch (error) {
+      if (isInsufficientCreditsError(error)) {
+        const message =
+          axios.isAxiosError(error) && error.response?.data?.error
+            ? String(error.response.data.error)
+            : "Prompt enhancement costs credits. Top up and try again.";
+        setEnhanceInsufficientMessage(message);
+      } else if (axios.isAxiosError(error) && error.response?.data?.error) {
+        toast.error(String(error.response.data.error));
+      } else {
+        toast.error("Failed to enhance prompt");
+      }
+    } finally {
+      setIsEnhancing(false);
+    }
+  }
+
+  function handleApplyEnhance() {
+    if (enhancePreview) {
+      setPrompt(enhancePreview.enhancedPrompt);
+    }
+    setEnhancePreview(null);
+  }
+
+  if (insufficientMessage) {
     return <InsufficientCreditsAlert message={insufficientMessage} />;
   }
 
@@ -269,17 +327,76 @@ if (insufficientMessage) {
           </div>
         )}
 
-        <label className="block text-sm font-medium">
-          Prompt
-          <textarea
-            aria-label="prompt"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the image you want to generate…"
-            rows={3}
-            className="mt-1.5 block w-full rounded-lg border bg-background px-3 py-2 text-sm"
-          />
-        </label>
+        <div>
+          <label className="block text-sm font-medium">
+            Prompt
+            <textarea
+              aria-label="prompt"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Describe the image you want to generate…"
+              rows={3}
+              className="mt-1.5 block w-full rounded-lg border bg-background px-3 py-2 text-sm"
+            />
+          </label>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleEnhance}
+              disabled={isEnhancing}
+              className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium text-vortex-600 hover:border-vortex-500/50 hover:bg-vortex-50 disabled:opacity-50 transition-colors dark:text-vortex-400 dark:hover:bg-vortex-950/50"
+            >
+              {isEnhancing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              {isEnhancing ? "Enhancing…" : "Enhance with AI"}
+            </button>
+            <span className="text-xs text-muted-foreground">
+              Rewrites your prompt using the selected project&apos;s brand
+              profile and aspect ratio (charges credits).
+            </span>
+          </div>
+
+          {enhanceInsufficientMessage ? (
+            <div className="mt-2">
+              <InsufficientCreditsAlert message={enhanceInsufficientMessage} />
+            </div>
+          ) : enhancePreview ? (
+            <div className="mt-2 rounded-lg border border-vortex-500/40 bg-muted/40 p-3 text-sm">
+              <p className="mb-1 flex items-center gap-1 text-xs font-medium text-vortex-600 dark:text-vortex-400">
+                <Sparkles className="h-3 w-3" />
+                Enhanced preview
+              </p>
+              <p className="text-muted-foreground">{enhancePreview.enhancedPrompt}</p>
+              {enhancePreview.enhancedNegativePrompt ? (
+                <p className="mt-2 text-xs italic text-muted-foreground">
+                  Negative: {enhancePreview.enhancedNegativePrompt}
+                </p>
+              ) : null}
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleApplyEnhance}
+                  className="inline-flex items-center gap-1 rounded-md bg-vortex-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-vortex-700 transition-colors"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Apply
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEnhancePreview(null)}
+                  className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Discard
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
           <label className="block text-sm font-medium">

@@ -15,6 +15,7 @@ import { z } from "zod";
 const enhancePromptSchema = z
   .object({
     sceneId: z.string().uuid().optional(),
+    projectId: z.string().uuid().optional(),
     prompt: z.string().min(1).optional(),
     negativePrompt: z.string().optional(),
     aspectRatio: z.string().optional(),
@@ -27,8 +28,9 @@ const enhancePromptSchema = z
 
 /**
  * Proxies the AI service's enhance-prompt endpoint. Accepts a `sceneId`
- * (resolves the prompt from the database) or a raw prompt, and returns the
- * enhanced generation prompt plus a negative prompt.
+ * (resolves the prompt from the database), a raw `prompt`, or a `projectId`
+ * (resolves the project's assigned brand profile so enhancement stays
+ * on-brand). Returns the enhanced generation prompt plus a negative prompt.
  */
 export async function POST(req: Request) {
   try {
@@ -51,7 +53,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let { sceneId, prompt, negativePrompt, aspectRatio, brandContext } =
+    let { sceneId, projectId, prompt, negativePrompt, aspectRatio, brandContext } =
       validation.data;
 
     let promptToEnhance: string | null | undefined = prompt;
@@ -95,6 +97,39 @@ export async function POST(req: Request) {
       // Auto-inject the project's assigned brand profile so prompt
       // enhancement stays on-brand without manual entry.
       const project = scene.storyboard.project;
+      const projectWithBrand = project as typeof project & {
+        brandDna?: {
+          id: string;
+          name: string;
+          visualIdentity: unknown;
+          voiceTone: unknown;
+          complianceRules: unknown;
+        } | null;
+      };
+      const resolvedBrandContext = composeBrandContext(
+        projectWithBrand.brandDna,
+        brandContext
+      );
+      if (resolvedBrandContext) {
+        brandContext = resolvedBrandContext;
+      }
+    }
+
+    if (projectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, createdBy: session.user.id },
+        include: { brandDna: true },
+      });
+
+      if (!project) {
+        return NextResponse.json(
+          { success: false, error: "Project not found" },
+          { status: 404 }
+        );
+      }
+
+      // Auto-inject the project's assigned brand profile so enhancement of the
+      // raw audio/image prompt stays on-brand (mirrors the sceneId path).
       const projectWithBrand = project as typeof project & {
         brandDna?: {
           id: string;

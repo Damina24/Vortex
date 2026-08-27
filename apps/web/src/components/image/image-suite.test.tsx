@@ -35,6 +35,9 @@ const notifyMock = vi.hoisted(() => ({
 
 vi.mock("@/lib/credits-client", () => ({
   notifyCreditsUpdated: notifyMock.notifyCreditsUpdated,
+  isInsufficientCreditsError: (error: unknown) =>
+    axiosMock.default.isAxiosError(error) &&
+    (error as { response?: { status?: number } }).response?.status === 402,
 }));
 
 const axiosMock = vi.hoisted(() => ({
@@ -218,6 +221,56 @@ describe("ImageSuite", () => {
     expect(
       screen.getByText(/Requires STABILITY_API_KEY env var/),
     ).toBeInTheDocument();
+  });
+
+  it("enhances the prompt with AI and applies the result", async () => {
+    axiosMock.default.post.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          enhancedPrompt: "a lush green meadow at golden hour, cinematic",
+          enhancedNegativePrompt: "blurry, low contrast",
+        },
+        credits: { cost: 1, remaining: 9 },
+      },
+    });
+
+    render(<ImageSuite {...props} />);
+    fireEvent.change(screen.getByRole("textbox", { name: /prompt/i }), {
+      target: { value: "a meadow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /enhance with ai/i }));
+
+    await screen.findByText(/enhanced preview/i);
+    expect(axiosMock.default.post).toHaveBeenCalledWith(
+      "/api/v1/ai/enhance-prompt",
+      { projectId: "project-1", prompt: "a meadow", aspectRatio: "16:9" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^apply$/i }));
+    expect(screen.getByRole("textbox", { name: /prompt/i })).toHaveValue(
+      "a lush green meadow at golden hour, cinematic",
+    );
+  });
+
+  it("surfaces a 402 from prompt enhancement as the inline buy-credits alert", async () => {
+    axiosMock.default.post.mockRejectedValueOnce({
+      response: {
+        status: 402,
+        data: { error: "Prompt enhancement costs 1 credit but you only have 0." },
+      },
+    });
+
+    render(<ImageSuite {...props} />);
+    fireEvent.change(screen.getByRole("textbox", { name: /prompt/i }), {
+      target: { value: "a meadow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /enhance with ai/i }));
+
+    const alert = await screen.findByTestId("insufficient-credits-alert");
+    expect(alert).toHaveTextContent(
+      "Prompt enhancement costs 1 credit but you only have 0.",
+    );
   });
 it("posts the selected provider and completes synchronously in mock mode", async () => {
     axiosMock.default.post.mockResolvedValueOnce({
