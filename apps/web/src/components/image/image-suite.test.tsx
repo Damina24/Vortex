@@ -175,6 +175,7 @@ describe("ImageSuite", () => {
       "Mock (offline SVG poster)",
       "Stability AI",
       "FLUX (Black Forest Labs)",
+      "OpenAI (gpt-image)",
     ]);
     expect(select).toHaveValue("mock");
   });

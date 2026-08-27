@@ -497,6 +497,165 @@ export class FluxImageProvider implements AsyncImageGenerationProvider {
 // Register the real async provider. The default remains `mock`.
 IMAGE_PROVIDER_REGISTRY.flux = () => new FluxImageProvider();
 
+// ============================================================
+// OpenAI — gpt-image image generation provider (sync)
+// ============================================================
+// Production-ready provider backed by the OpenAI Images API
+// (`POST /v1/images/generations`, Bearer key). gpt-image-1 returns the rendered
+// image inline as base64 when `response_format: "b64_json"` is requested, so it
+// is synchronous like the Stability provider: one request produces a PNG asset.
+// Select it with `IMAGE_PROVIDER=gpt-image` and set `OPENAI_API_KEY`.
+
+export interface OpenAIImageProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  model?: string;
+  quality?: string;
+}
+
+const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com";
+const OPENAI_DEFAULT_IMAGE_MODEL = "gpt-image-1";
+const OPENAI_DEFAULT_QUALITY = "high";
+
+/**
+ * Maps an aspect ratio to the closest size the OpenAI Images API accepts
+ * (`1536x1024`, `1024x1536`, `1024x1024`, or `auto`). gpt-image-1 has no
+ * 4:5 size, so it falls back to the portrait `1024x1536`.
+ */
+function openAiImageSizeFor(aspectRatio: string): string {
+  switch (aspectRatio) {
+    case "16:9":
+      return "1536x1024";
+    case "9:16":
+    case "4:5":
+      return "1024x1536";
+    default:
+      return "1024x1024";
+  }
+}
+
+export class OpenAIImageProvider implements ImageGenerationProvider {
+  readonly name = "gpt-image";
+
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly model: string;
+  private readonly quality: string;
+
+  constructor(config: OpenAIImageProviderConfig = {}) {
+    this.apiKey = config.apiKey ?? process.env.OPENAI_API_KEY ?? "";
+    this.baseUrl = (config.baseUrl ?? OPENAI_DEFAULT_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+    this.fetchImpl = config.fetchImpl ?? globalThis.fetch;
+    this.model =
+      config.model ?? process.env.OPENAI_IMAGE_MODEL ?? OPENAI_DEFAULT_IMAGE_MODEL;
+    this.quality =
+      config.quality ??
+      process.env.OPENAI_IMAGE_QUALITY ??
+      OPENAI_DEFAULT_QUALITY;
+  }
+
+  async generate(
+    params: ImageGenerationParams,
+  ): Promise<ImageGenerationResult> {
+    if (!this.apiKey) {
+      throw new Error(
+        "OPENAI_API_KEY is required when IMAGE_PROVIDER=gpt-image",
+      );
+    }
+
+    // gpt-image-1 encodes style and composition in the prompt text (it has no
+    // separate style-preset field), so fold the optional style hint in rather
+    // than silently dropping it.
+    const prompt = params.style
+      ? `${params.prompt}, ${params.style} style`
+      : params.prompt;
+
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/images/generations`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.model,
+          prompt,
+          n: 1,
+          size: openAiImageSizeFor(params.aspectRatio),
+          quality: this.quality,
+          response_format: "b64_json",
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `OpenAI image request failed with status ${response.status}`,
+      );
+    }
+
+    const data = (await response.json()) as { data?: unknown };
+    const items = Array.isArray(data.data) ? data.data : [];
+    const item = items[0] as Record<string, unknown> | undefined;
+    let b64 =
+      item && typeof item.b64_json === "string" ? (item.b64_json as string) : "";
+
+    // gpt-image occasionally wraps the base64 payload in JSON (a quoted string
+    // or array); unwrap it before decoding.
+    if (b64.startsWith("[") || b64.startsWith("\"")) {
+      try {
+        const parsed = JSON.parse(b64) as unknown;
+        if (Array.isArray(parsed)) b64 = String(parsed[0] ?? "");
+        else b64 = String(parsed);
+      } catch {
+        // Fall through to the raw payload.
+      }
+    }
+    const comma = b64.indexOf(",");
+    if (comma >= 0 && /^data:/i.test(b64.slice(0, 20))) {
+      b64 = b64.slice(comma + 1);
+    }
+    if (!b64) {
+      throw new Error("OpenAI succeeded but returned no image payload");
+    }
+
+    const body = Buffer.from(b64, "base64");
+    const dims = imageDimensionsFor(params.aspectRatio);
+    const digest = createHash("sha1")
+      .update(`${params.prompt}:${params.aspectRatio}`)
+      .digest("hex");
+
+    return {
+      provider: this.name,
+      providerJobId: `gpt_image_${digest.slice(0, 12)}`,
+      width: dims.width,
+      height: dims.height,
+      files: [
+        {
+          filename: `gpt-image-${digest.slice(0, 8)}.png`,
+          contentType: "image/png",
+          body,
+        },
+      ],
+      metadata: {
+        model: this.model,
+        aspectRatio: params.aspectRatio,
+        format: "png",
+        provider: "gpt-image",
+      },
+    };
+  }
+}
+
+// Register the real synchronous provider. The default remains `mock`.
+IMAGE_PROVIDER_REGISTRY["gpt-image"] = () => new OpenAIImageProvider();
+
 /** Providers that generate without any external credentials. */
 const KEYLESS_IMAGE_PROVIDERS = new Set(["mock"]);
 
@@ -526,6 +685,9 @@ function missingImageProviderCredentials(name: string): string | undefined {
       break;
     case "flux":
       required.push("FLUX_API_KEY");
+      break;
+    case "gpt-image":
+      required.push("OPENAI_API_KEY");
       break;
     default:
       return undefined;

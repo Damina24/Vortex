@@ -560,6 +560,25 @@ An optional real image provider backed by a FLUX-compatible generation gateway
   gateway reports the image is ready (see the async audio/video providers for
   the same submit → poll → complete flow).
 
+### Real image provider: OpenAI (`IMAGE_PROVIDER=gpt-image`)
+
+An optional real image provider backed by the OpenAI Images API
+(`POST /v1/images/generations`, Bearer key). `gpt-image-1` returns the rendered
+image inline as base64 (`response_format: "b64_json"`), so it is synchronous
+like Stability: one request produces a PNG asset.
+
+- Set `IMAGE_PROVIDER=gpt-image` and provide `OPENAI_API_KEY`. Optionally set
+  `OPENAI_IMAGE_MODEL` (default `gpt-image-1`) and `OPENAI_IMAGE_QUALITY`
+  (default `high`), or override the base URL via the injectable
+  `OpenAIImageProviderConfig`.
+- Aspect ratios map to the closest size the Images API accepts (`16:9` →
+  `1536x1024`; `9:16`/`4:5` → `1024x1536`; anything else → `1024x1024`).
+- gpt-image has no separate style-preset field, so the Suite's style hint is
+  folded into the prompt text.
+- Like Stability, it completes synchronously on `POST /api/v1/image-jobs` and
+  is unit-tested with a stubbed `fetch` (`OpenAiImageProvider` tests in
+  `image-providers.test.ts`).
+
 ### Publishing (direct platform publishing)
 
 Publishes finished video assets directly to platforms and records each publish

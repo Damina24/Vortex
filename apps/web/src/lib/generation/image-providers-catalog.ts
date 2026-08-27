@@ -22,6 +22,7 @@ export const IMAGE_PROVIDER_CATALOG: ReadonlyArray<{
   { value: "mock", label: "Mock (offline SVG poster)" },
   { value: "stability", label: "Stability AI" },
   { value: "flux", label: "FLUX (Black Forest Labs)" },
+  { value: "gpt-image", label: "OpenAI (gpt-image)" },
 ];
 
 /** Aspect-ratio options offered in the Image Suite. */
