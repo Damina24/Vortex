@@ -14,7 +14,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 20 fails to load jsdom-based vitest workers
+          # ("webidl.util.markAsUncloneable is not a function" from undici).
+          # Node 24 is what everything is verified on locally.
+          node-version: 24
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
