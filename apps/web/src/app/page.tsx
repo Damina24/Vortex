@@ -20,6 +20,7 @@ export default function HomePage() {
             className="flex items-center gap-2"
             whileHover={{ scale: 1.02 }}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element -- Small public static SVG logo; next/image would need a static import or domain config for a 32px mark. */}
             <img src="/vortex-logo.svg" alt="VORTEX AI" className="h-8 w-8 shrink-0" />
             <span className="text-xl font-bold">VORTEX AI</span>
           </motion.div>

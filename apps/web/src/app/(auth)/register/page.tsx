@@ -48,6 +48,7 @@ export default function RegisterPage() {
       <header className="border-b">
         <div className="container flex h-16 items-center px-4">
           <Link href="/" className="flex items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element -- Small public static SVG logo; next/image would need a static import or domain config for a 32px mark. */}
             <img src="/vortex-logo.svg" alt="VORTEX AI" className="h-8 w-8" />
             <span className="text-xl font-bold">VORTEX AI</span>
           </Link>
