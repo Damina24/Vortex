@@ -1,5 +1,9 @@
 # VORTEX AI — Deployment & Setup Guide
 
+> 🚀 **New to the launch process?** Start with [`LAUNCH.md`](./LAUNCH.md) — a
+> simple, step-by-step go-live guide (accounts → database → hosting → billing →
+> go live). This file is the deep technical reference for each piece.
+
 ## 1) Vercel Environment Variables
 
 Go to your Vercel project **Settings → Environment Variables** and add these:
